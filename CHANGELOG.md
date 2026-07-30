@@ -7,6 +7,15 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+### Added
+
+- **Next/prev-change navigation in the diff review.** The diff header now has ▲/▼ buttons
+  (and `n`/`p` — or `j`/`k` — keys) that jump straight to the next/previous changed hunk,
+  scrolling to and selecting it, with a position counter. No more hand-scrolling past dense
+  unchanged context to find the actual edits. (The existing view popover's `diff`/`full`
+  toggle still controls whether unchanged context collapses.)
+
+
 ## [1.14.3] — 2026-07-15
 
 ## [1.14.2] — 2026-07-15

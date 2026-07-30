@@ -23,7 +23,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { GripVertical, Play, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
+import { GripVertical, Play, RefreshCw, Search, SlidersHorizontal, ChevronUp, ChevronDown } from "lucide-react";
 import { ReviewPopover, CommentBox, ActionToolbar, ReviewAnnotation, composerAnchor } from "./review-ui";
 import { useTileFont, FontStepper, handleFontKey } from "./tile-font";
 import { FullscreenShell } from "./tile-fullscreen";
@@ -446,6 +446,37 @@ export function DiffTile({ repoPath, initialMode = "working", initialBase = "ori
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, matches.length]);
 
+  // ── next/prev-change navigation ────────────────────────────────────────────
+  // One anchor per hunk; the ▲/▼ header buttons + n/p keys step through them,
+  // scrolling + selecting each so you walk the actual changes instead of
+  // hand-scrolling past dense context. Same scroll mechanism as search.
+  const changes = useMemo(() => collectChanges(baseItems), [baseItems]);
+  const [changeIdx, setChangeIdx] = useState(-1);
+  const gotoChange = useCallback(
+    (idx: number) => {
+      if (changes.length === 0) return;
+      const i = ((idx % changes.length) + changes.length) % changes.length;
+      const m = changes[i];
+      if (!m) return;
+      setChangeIdx(i);
+      // Un-collapse a viewed/collapsed file so its line is reachable.
+      setCollapsed((prev) => {
+        if (!prev.has(m.file)) return prev;
+        const next = new Set(prev);
+        next.delete(m.file);
+        return next;
+      });
+      const cv = codeViewRef.current;
+      if (!cv) return;
+      cv.scrollTo({ type: "line", id: m.id, lineNumber: m.line, side: m.side, align: "center" });
+      cv.setSelectedLines({ id: m.id, range: { start: m.line, end: m.line, side: m.side } });
+    },
+    [changes],
+  );
+  // New diff (mode switch / refresh) → reset the cursor so the counter reads N,
+  // and the first ▼ starts at change 1.
+  useEffect(() => { setChangeIdx(-1); }, [changes.length]);
+
   // ── CodeView options ────────────────────────────────────────────────────
   const options: CodeViewOptions<ReviewComment> = useMemo(
     () => ({
@@ -650,7 +681,17 @@ export function DiffTile({ repoPath, initialMode = "working", initialBase = "ori
     <div
       className="hm-glass-surface flex flex-col h-full bg-[var(--color-bg2)] border border-[var(--color-line)] rounded-xl overflow-hidden"
       style={{ ...PIERRE_CSS_VARS, "--diffs-font-size": `${font.size}px` } as React.CSSProperties}
-      onKeyDownCapture={(e) => handleFontKey(e, font)}
+      onKeyDownCapture={(e) => {
+        handleFontKey(e, font);
+        // n / p (or j / k) step through changes — but not while typing in the
+        // search box, a comment composer, or any editable field.
+        const el = e.target as HTMLElement;
+        const editing = el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+        if (!editing && !e.metaKey && !e.ctrlKey && !e.altKey && changes.length > 0) {
+          if (e.key === "n" || e.key === "j") { e.preventDefault(); gotoChange(changeIdx + 1); }
+          else if (e.key === "p" || e.key === "k") { e.preventDefault(); gotoChange(changeIdx - 1); }
+        }
+      }}
     >
       {/* tile chrome */}
       <div className="tile-drag-handle h-8 flex items-center gap-2 px-2.5 bg-[var(--color-bg3)] border-b border-[var(--color-line)] text-[11px] font-mono text-[var(--color-fg2)] cursor-grab active:cursor-grabbing">
@@ -717,6 +758,33 @@ export function DiffTile({ repoPath, initialMode = "working", initialBase = "ori
             <span aria-hidden className="size-1.5 rounded-full" style={{ background: staged ? "var(--color-ok)" : "var(--color-fg3)" }} />
             staged
           </button>
+        )}
+
+        {/* next/prev-change nav — step through the actual changed hunks (▲/▼ or
+            n/p keys) instead of hand-scrolling past dense context. Counter shows
+            position/total; only shown when there's more than one change. */}
+        {changes.length > 1 && (
+          <div className="nodrag ml-1.5 inline-flex items-center gap-0.5 bg-[var(--color-bg)] border border-[var(--color-line2)] rounded px-1 py-0.5" title="jump between changes (n / p)">
+            <button
+              className="text-[var(--color-fg3)] hover:text-[var(--color-fg)] grid place-items-center size-4"
+              onClick={() => gotoChange(changeIdx - 1)}
+              title="previous change (p)"
+              aria-label="previous change"
+            >
+              <ChevronUp size={12} />
+            </button>
+            <span className="text-[9.5px] font-mono tabular-nums text-[var(--color-fg3)] min-w-[30px] text-center">
+              {changeIdx >= 0 ? `${changeIdx + 1}/${changes.length}` : `${changes.length}`}
+            </span>
+            <button
+              className="text-[var(--color-fg3)] hover:text-[var(--color-fg)] grid place-items-center size-4"
+              onClick={() => gotoChange(changeIdx + 1)}
+              title="next change (n)"
+              aria-label="next change"
+            >
+              <ChevronDown size={12} />
+            </button>
+          </div>
         )}
 
         {/* in-diff search — collapsed to an icon; click reveals the input.
@@ -1438,6 +1506,29 @@ interface SearchMatch {
 /** Collect every line-level match across all diff items, mapping hunkContent
  *  block indices back to real line numbers + side (port of codiff's
  *  getDiffSearchResult). Lets us scrollTo + highlight each hit precisely. */
+/** One anchor per HUNK (its first changed line) across every diff item, in file
+ *  order — the jump targets for next/prev-change navigation. Prefers the addition
+ *  side (the new code); a pure-deletion hunk anchors on its first deleted line.
+ *  Same hunk-walk as collectMatches, but keyed on "is a change" rather than a query. */
+function collectChanges(items: CodeViewDiffItem<ReviewComment>[]): SearchMatch[] {
+  const out: SearchMatch[] = [];
+  for (const it of items) {
+    const fd = it.fileDiff;
+    for (const hunk of fd.hunks) {
+      let del = hunk.deletionStart;
+      let add = hunk.additionStart;
+      for (const c of hunk.hunkContent) {
+        if (c.type === "context") { del += c.lines; add += c.lines; continue; }
+        // First non-context block = the hunk's anchor. Then stop (one per hunk).
+        if (c.additions > 0) out.push({ id: it.id, file: fd.name, line: add, side: "additions" });
+        else out.push({ id: it.id, file: fd.name, line: del, side: "deletions" });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 function collectMatches(items: CodeViewDiffItem<ReviewComment>[], query: string): SearchMatch[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
