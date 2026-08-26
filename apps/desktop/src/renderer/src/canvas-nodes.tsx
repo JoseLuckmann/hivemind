@@ -25,6 +25,7 @@ import { TerminalTile } from "./TerminalTile";
 import { BrowserTile } from "./BrowserTile";
 import { IssuesTile } from "./IssuesTile";
 import { PlanReviewTile } from "./PlanReviewTile";
+import { FileTile } from "./FileTile";
 import { FrameNode, type FrameNodeData } from "./FrameNode";
 import { TileErrorBoundary } from "./TileErrorBoundary";
 
@@ -633,6 +634,19 @@ export function TileBody({
           </Suspense>
         </TileErrorBoundary>
       );
+    case "file":
+      return (
+        <TileErrorBoundary label="File" onClose={data.onClose as (() => void) | undefined}>
+          <FileTile
+            repoPath={data.repoPath as string}
+            file={data.file as string}
+            onClose={data.onClose as () => void}
+            onOpenInBrowser={data.onOpenInBrowser as ((u: string) => void) | undefined}
+            pinned={data.pinned as boolean | undefined}
+            onTogglePin={data.onTogglePin as never}
+          />
+        </TileErrorBoundary>
+      );
     case "browser":
       return (
         <TileErrorBoundary label="Browser" onClose={data.onClose as (() => void) | undefined}>
@@ -722,6 +736,29 @@ const WorkbenchNode = memo(function WorkbenchNode({
   );
 });
 
+type FileNodeData = {
+  repoPath: string;
+  file: string;
+  onOpenInBrowser?: (url: string) => void;
+  onClose?: () => void;
+};
+const FileNode = memo(function FileNode({
+  id,
+  data,
+  selected,
+}: {
+  id: string;
+  data: WithResize<FileNodeData>;
+  selected: boolean;
+}) {
+  const wheelRef = useTileWheelZoom(selected);
+  return (
+    <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={360} minHeight={220} wheelRef={wheelRef}>
+      <TileBody type="file" data={data as unknown as Record<string, unknown>} selected={selected} />
+    </TileShell>
+  );
+});
+
 type BrowserNodeData = {
   tileId: string;
   frameId?: string | null;
@@ -805,6 +842,7 @@ export const nodeTypes: NodeTypes = {
   terminal: TerminalNode as unknown as NodeTypes[string],
   diff: DiffNode as unknown as NodeTypes[string],
   workbench: WorkbenchNode as unknown as NodeTypes[string],
+  file: FileNode as unknown as NodeTypes[string],
   issues: IssuesNode as unknown as NodeTypes[string],
   browser: BrowserNode as unknown as NodeTypes[string],
   planReview: PlanReviewNode as unknown as NodeTypes[string],

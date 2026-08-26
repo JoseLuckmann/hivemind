@@ -9,6 +9,11 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ### Added
 
+- **Single-file tile.** Open ONE workspace file (a spec, a config, …) in a lightweight tile
+  without the full explorer/IDE — pick it from a searchable workspace file list via **File…**
+  in a frame's **+** menu or the rail context menu's **Open** submenu. It reuses the existing
+  editor (CodeMirror, syntax highlight, dirty/save, find, markdown preview) scoped to one
+  file; the bound file persists so the tile reopens on it.
 - **Windowed ("editor-like") view mode.** Switch the canvas into a VS Code-style layout
   (⌘E, or from **Settings ▸ View**): the graph rail stays on the left, a single tab strip
   runs across the top with each tab tinted by its frame's color, and the active tile fills

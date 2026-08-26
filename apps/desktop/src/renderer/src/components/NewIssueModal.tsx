@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { useCreateIssue, useIssues } from "../queries";
+import { useCreateIssue, useIssues, useWorkspaces } from "../queries";
 import type { Assignee, IssueState } from "@hivemind/core/types";
 import { AssigneePicker, LabelPicker, ParentPicker } from "../issues/pickers";
 
@@ -50,12 +50,36 @@ function PickerBox({ children }: { children: React.ReactNode }) {
 
 export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
   const create = useCreateIssue();
-  const { data: allIssues = [] } = useIssues(root);
+  const { data: workspaces = [] } = useWorkspaces();
+  // Which workspace's .hivemind the issue is created in. Defaults to the app's
+  // current root; a picker lets you file it into any registered workspace when
+  // several are open (e.g. base repo + bound workspace-zone frames).
+  const [selectedRoot, setSelectedRoot] = useState<string | null>(root);
+  // Keep the selection tracking the app root until the user explicitly picks a
+  // workspace — covers the modal opening before the project has resolved (root
+  // was null), which otherwise left selectedRoot stale-null and blocked submit.
+  useEffect(() => { if (open) setSelectedRoot(root); }, [open, root]);
+  // Labels/parent candidates come from the SELECTED workspace, so they match
+  // where the issue will actually live.
+  const { data: allIssues = [] } = useIssues(selectedRoot);
   const allLabels = useMemo(() => Array.from(new Set(allIssues.flatMap((i) => i.labels))).sort(), [allIssues]);
   const allAssignees = useMemo(
     () => Array.from(new Set(allIssues.map((i) => i.assignee?.id).filter((x): x is string => !!x))).sort(),
     [allIssues],
   );
+  // The current root might not be in the registry list yet (freshly init'd) —
+  // include it so the picker always has the active workspace as an option.
+  // Normalize (strip trailing slash) so a path-form difference doesn't create a
+  // phantom duplicate that wrongly shows the picker for a single workspace.
+  const workspaceOptions = useMemo(() => {
+    const norm = (p: string) => p.replace(/\/+$/, "");
+    const opts = workspaces.map((w) => ({ root: w.root, label: w.title || w.prefix, prefix: w.prefix }));
+    if (root && !opts.some((o) => norm(o.root) === norm(root))) {
+      const name = root.replace(/\/\.hivemind\/?$/, "").split("/").filter(Boolean).pop() ?? "current";
+      opts.unshift({ root, label: name, prefix: "" });
+    }
+    return opts;
+  }, [workspaces, root]);
 
   const [title, setTitle] = useState("");
   const [state, setState] = useState<IssueState>("todo");
@@ -77,10 +101,14 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!root || !title.trim()) return;
+    // When the workspace picker isn't shown (0–1 workspaces), always use the
+    // live app root — `selectedRoot` may be a stale snapshot from before the
+    // project resolved. Only trust the explicit selection when the picker is up.
+    const targetRoot = workspaceOptions.length > 1 ? (selectedRoot ?? root) : root;
+    if (!targetRoot || !title.trim()) return;
     create.mutate(
       {
-        root,
+        root: targetRoot,
         opts: {
           title: title.trim(),
           state,
@@ -124,6 +152,25 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
                 className={inputCls}
               />
             </Field>
+
+            {/* Workspace — which .hivemind/ the issue is filed into. Only shown
+                when more than one workspace is available (otherwise it's the
+                obvious single one). */}
+            {workspaceOptions.length > 1 && (
+              <Field label="Workspace">
+                <select
+                  value={selectedRoot ?? ""}
+                  onChange={(e) => setSelectedRoot(e.target.value || null)}
+                  className={inputCls}
+                >
+                  {workspaceOptions.map((w) => (
+                    <option key={w.root} value={w.root}>
+                      {w.label}{w.prefix ? ` (${w.prefix})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="State">
@@ -174,7 +221,7 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
             </button>
             <button
               type="submit"
-              disabled={!title.trim() || create.isPending}
+              disabled={!title.trim() || !root || create.isPending}
               className="px-3.5 py-2 text-[12px] font-semibold text-white bg-[var(--color-brand)] rounded-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed hm-soft"
             >
               {create.isPending ? "Creating…" : "Create issue"}
