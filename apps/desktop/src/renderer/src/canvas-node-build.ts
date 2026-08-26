@@ -209,7 +209,7 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
   };
   for (const t of tiles) {
     const effRepo = tileRepo(t.id);
-    if ((t.kind === "editor" || t.kind === "diff") && !effRepo) continue;
+    if ((t.kind === "editor" || t.kind === "diff" || t.kind === "file") && !effRepo) continue;
     let node: Omit<Node, "position">;
     const { width: w, height: h } = defaultSizeForKind(t.kind);
     if (t.kind === "editor") {
@@ -223,6 +223,20 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
           onOpenFile: (file: string) => openFileInTile(t.id, file),
           onOpenInBrowser: (url: string) => openUrlInBrowser(t.id, url),
           onCloseTab: (file: string) => closeTabInTile(t.id, file),
+          onClose: () => closeTile(t.id),
+          onResize: onNodeResizeCommit,
+        },
+        dragHandle: ".tile-drag-handle",
+      };
+    } else if (t.kind === "file") {
+      node = {
+        id: t.id,
+        type: "file",
+        style: sized(t.id, w, h),
+        data: {
+          repoPath: effRepo,
+          file: t.file ?? "",
+          onOpenInBrowser: (url: string) => openUrlInBrowser(t.id, url),
           onClose: () => closeTile(t.id),
           onResize: onNodeResizeCommit,
         },

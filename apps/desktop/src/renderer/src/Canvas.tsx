@@ -55,6 +55,7 @@ import { useCanvasShortcuts } from "./useCanvasShortcuts";
 import { useNodeDragStop } from "./useNodeDragStop";
 import { WindowsView } from "./WindowsView";
 import { GitCommitModal } from "./GitCommitModal";
+import { FilePickerModal } from "./FilePickerModal";
 import { useGitPush, useGitPull } from "./queries";import {
   loadViewMode, saveViewMode, loadMinimized, saveMinimized, nextActiveTab, type ViewMode,
 } from "./windows-view-state";
@@ -556,7 +557,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
       // supply the repo even when the canvas has no global one.
       const owner = fo[t.id] ? frames.find((f) => f.id === fo[t.id]) : undefined;
       const effRepo = owner?.worktreePath ?? owner?.workspacePath ?? repoPath ?? null;
-      if ((t.kind === "editor" || t.kind === "diff") && !effRepo) continue;
+      if ((t.kind === "editor" || t.kind === "diff" || t.kind === "file") && !effRepo) continue;
       // planReview tiles are a live blocked agent waiting on your review — they
       // DO belong in the Layers panel so you can navigate to them and see the
       // "review" status (LayersPanel renders kind === "planReview" specially).
@@ -765,6 +766,22 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     return () => window.removeEventListener("hivemind:frame-git", onGit as EventListener);
   }, []);
 
+  // Single-file tile: pick a workspace file, then spawn a `file` tile bound to
+  // it into the frame. Fired by the "File…" entries in the spawn menus.
+  const [filePick, setFilePick] = useState<{ frameId: string; repoPath: string | null } | null>(null);
+  useEffect(() => {
+    const onOpenFile = (e: Event) => {
+      const fid = (e as CustomEvent<{ frameId?: string }>).detail?.frameId;
+      const frameId = fid ?? selectedFrameIdRef.current ?? framesRef.current[0]?.id;
+      if (!frameId) return;
+      const f = framesRef.current.find((x) => x.id === frameId);
+      const repo = f?.worktreePath ?? f?.workspacePath ?? repoPathRef.current ?? null;
+      setFilePick({ frameId, repoPath: repo });
+    };
+    window.addEventListener("hivemind:frame-open-file", onOpenFile as EventListener);
+    return () => window.removeEventListener("hivemind:frame-open-file", onOpenFile as EventListener);
+  }, []);
+
   // Position a new tile inside a frame. Tiles pack left-to-right then WRAP to a
   // new row past FRAME_ROW_MAX (so a frame grows DOWN, not infinitely right).
   // The frame's SIZE is the auto-fit effect's job — it derives geometry from
@@ -792,6 +809,8 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
   }, []);
   const frameActions = useMemo(() => ({
     onOpenInFrame: (frameId: string, kind: string) => frameOpen(frameId, kind),
+    onOpenFilePicker: (frameId: string) =>
+      window.dispatchEvent(new CustomEvent("hivemind:frame-open-file", { detail: { frameId } })),
     onCreateWorktree,
     onAttachWorktree,
     onBindWorkspace: (frameId: string) => bindWorkspace(frameId),
@@ -1759,6 +1778,14 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
         repoPath={gitModalRepo}
         open={gitModalRepo !== null}
         onOpenChange={(o) => { if (!o) setGitModalRepo(null); }}
+      />
+      {/* Single-file tile picker — choose a workspace file, then spawn a `file`
+          tile bound to it into the target frame. */}
+      <FilePickerModal
+        repoPath={filePick?.repoPath ?? null}
+        open={filePick !== null}
+        onOpenChange={(o) => { if (!o) setFilePick(null); }}
+        onPick={(file) => { if (filePick) spawnTile("file", filePick.frameId, { file }); setFilePick(null); }}
       />
     </div>
     </PinnedLayerContext.Provider>

@@ -68,6 +68,11 @@ interface Props {
    *  (border/shadow/header). Used by WorkbenchTile, which supplies its own
    *  shell. Defaults to false so the standalone tile keeps working. */
   embedded?: boolean;
+  /** When true (single-file tile), DON'T render the tab list — the host shows
+   *  the filename in its own header. A slim controls strip (preview/diff/
+   *  fullscreen + dirty dot) replaces the tab bar so those affordances survive.
+   *  Implies embedded. */
+  singleFile?: boolean;
 }
 
 // ── theme ─────────────────────────────────────────────────────────────────
@@ -207,7 +212,7 @@ interface TabState {
   diskChanged?: boolean;
 }
 
-export function EditorTile({ repoPath, tabs, onCloseTab, onClose, activeReq, onOpenInBrowser, embedded = false }: Props) {
+export function EditorTile({ repoPath, tabs, onCloseTab, onClose, activeReq, onOpenInBrowser, embedded = false, singleFile = false }: Props) {
   // Per-tile font size (A−/A+ + Ctrl/Cmd +/−/0). The CM theme uses fontSize:
   // "inherit", so the size set on the root below flows into the editor.
   const font = useTileFont(`editor:${repoPath}`, 13);
@@ -617,7 +622,50 @@ export function EditorTile({ repoPath, tabs, onCloseTab, onClose, activeReq, onO
         </header>
       )}
 
-      {/* tab bar */}
+      {/* tab bar — OR, in single-file mode, a slim controls strip (no tab chrome,
+          no ×; the host header owns the filename + close). */}
+      {singleFile ? (
+        <div className="nodrag flex items-center gap-2 px-2.5 h-7 bg-[var(--color-bg2)] border-b border-[var(--color-line)] text-[10px] text-[var(--color-fg3)]">
+          {activeMeta?.dirty && (
+            <span className="size-1.5 rounded-full bg-[var(--color-warn)]" title="unsaved changes" aria-hidden />
+          )}
+          {saving && <span>saving…</span>}
+          <span className="ml-auto flex items-center gap-1.5">
+            {active && isMarkdownPath(active) && (
+              <button
+                onClick={() => setPreviewMode((m) => ({ ...m, [active]: !m[active] }))}
+                className={`text-[9.5px] leading-none px-1.5 py-0.5 rounded border ${
+                  previewMode[active]
+                    ? "border-[var(--color-brand)] text-[var(--color-brand)]"
+                    : "border-[var(--color-line2)] text-[var(--color-fg3)] hover:text-[var(--color-fg)]"
+                }`}
+                title={previewMode[active] ? "edit (show source)" : "preview rendered markdown"}
+                aria-label="toggle markdown preview"
+              >◉ preview</button>
+            )}
+            {active && (
+              <button
+                onClick={() => setDiffMode((m) => ({ ...m, [active]: !m[active] }))}
+                className={`text-[9.5px] leading-none px-1.5 py-0.5 rounded border ${
+                  activeDiff
+                    ? "border-[var(--color-brand)] text-[var(--color-brand)]"
+                    : "border-[var(--color-line2)] text-[var(--color-fg3)] hover:text-[var(--color-fg)]"
+                }`}
+                title="Toggle diff vs HEAD (⇄)"
+                aria-label="toggle diff"
+              >⇄ {activeDiff ? "diff" : "edit"}</button>
+            )}
+            <span className="text-[9.5px]">⌘S to save</span>
+            <FontStepper {...font} />
+            <button
+              onClick={() => setOverlay((v) => !v)}
+              className="grid place-items-center text-[var(--color-fg3)] hover:text-[var(--color-fg)] text-[12px] leading-none"
+              aria-label="fullscreen editor"
+              title="Fullscreen · Esc to exit"
+            >⤢</button>
+          </span>
+        </div>
+      ) : (
       <div className="nodrag flex items-stretch overflow-x-auto bg-[var(--color-bg2)] border-b border-[var(--color-line)] min-h-[28px]">
         {tabs.length === 0 ? (
           <span className="px-3 py-1.5 text-[11px] text-[var(--color-fg3)]">no files open</span>
@@ -719,6 +767,7 @@ export function EditorTile({ repoPath, tabs, onCloseTab, onClose, activeReq, onO
           ⤢
         </button>
       </div>
+      )}
 
       {/* Changed-on-disk banner: the file was edited externally while this tab
           had unsaved changes. Non-destructive — the user picks Reload or Keep. */}

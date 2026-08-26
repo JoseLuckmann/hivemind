@@ -21,7 +21,7 @@ import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   GitBranch, FolderGit2, Server, LayoutGrid, Plus, Pencil, Trash2, Palette,
-  Bot, GitCommitHorizontal, ChevronRight, ArrowUp, ArrowDown,
+  Bot, GitCommitHorizontal, ChevronRight, ArrowUp, ArrowDown, FileText,
 } from "lucide-react";
 import { AGENTS } from "./agents";
 import { WorktreePicker } from "./WorktreePicker";
@@ -33,6 +33,8 @@ export interface FrameActions {
   /** Spawn a tile/agent into the frame. `kind` is an agent id (claude/codex/…)
    *  or one of shell/tree/diff/issues/browser. */
   onOpenInFrame: (frameId: string, kind: string) => void;
+  /** Open the workspace file picker → spawn a single-file tile into the frame. */
+  onOpenFilePicker: (frameId: string) => void;
   onCreateWorktree: (frameId: string, branch: string) => void;
   onAttachWorktree: (frameId: string, entry: import("../../shared/ipc").WorktreeEntry) => void;
   onBindWorkspace: (frameId: string) => void;
@@ -170,6 +172,15 @@ export function FrameRailMenu({
         <SubmenuRow icon={<Plus size={13} />} label="Open" open={sub === "open"} onOpen={() => setSub("open")}>
           {OPEN_KINDS.map(({ kind, label, icon: Icon }) => (
             <Item key={kind} icon={<Icon size={13} />} label={label} onClick={() => { actions.onOpenInFrame(fid, kind); close(); }} />
+          <Item icon={<FileText size={13} />} label="File…" onClick={() => { actions.onOpenFilePicker(fid); close(); }} />
+          {([
+            ["shell", "Terminal"],
+            ["tree", "Editor"],
+            ["diff", "Diff"],
+            ["issues", "Issues"],
+            ["browser", "Browser"],
+          ] as const).map(([kind, label]) => (
+            <Item key={kind} icon={<Plus size={13} />} label={label} onClick={() => { actions.onOpenInFrame(fid, kind); close(); }} />
           ))}
         </SubmenuRow>
 

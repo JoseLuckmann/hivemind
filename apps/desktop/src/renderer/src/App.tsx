@@ -177,6 +177,25 @@ export function App() {
   useFsChangedInvalidation(repoPath, root);
   const { data: issues = [] } = useIssues(root);
 
+  // Mirror the canvas view mode so top-right chrome can adapt (in windows mode
+  // the tab strip owns the top edge, so the wide "New issue" button collapses
+  // to an icon to avoid fighting the tabs). Kept in sync via the same events
+  // Canvas/Settings dispatch.
+  const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode());
+  useEffect(() => {
+    const onToggle = () => setViewMode(loadViewMode());
+    const onSet = (e: Event) => {
+      const m = (e as CustomEvent<{ mode?: ViewMode }>).detail?.mode;
+      if (m === "canvas" || m === "windows") setViewMode(m);
+    };
+    window.addEventListener("hivemind:toggle-view-mode", onToggle);
+    window.addEventListener("hivemind:set-view-mode", onSet as EventListener);
+    return () => {
+      window.removeEventListener("hivemind:toggle-view-mode", onToggle);
+      window.removeEventListener("hivemind:set-view-mode", onSet as EventListener);
+    };
+  }, []);
+
   // Canvas-only: the Board/List views + their sidebar/filter chrome were
   // removed — the canvas IS the workspace (issues live as the IssuesTile, the
   // ⌘K palette, and IssuePeek). No view switcher.
@@ -368,15 +387,29 @@ export function App() {
         />
         <div className="absolute top-0 right-0 z-40 flex items-start gap-2 px-3 py-2.5 pointer-events-none">
           {root && (
-            <button
-              onClick={() => setNewOpen(true)}
-              className="pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hm-island text-[12px] font-medium text-[var(--color-fg)] hover:bg-[var(--color-bg3)] transition-colors"
-              title="New issue (⌘N)"
-            >
-              <Plus aria-hidden className="size-3.5 text-[var(--color-fg2)]" />
-              <span>New issue</span>
-              <kbd className="font-mono text-[9.5px] text-[var(--color-fg3)] ml-0.5">⌘N</kbd>
-            </button>
+            viewMode === "windows" ? (
+              // Windows mode: the tab strip owns the top edge — collapse to a
+              // compact icon button (matches the Settings gear) so it doesn't
+              // crowd the tabs.
+              <button
+                onClick={() => setNewOpen(true)}
+                className="pointer-events-auto relative inline-flex items-center justify-center size-8 rounded-lg hm-island text-[var(--color-fg2)] hover:bg-[var(--color-bg3)] hover:text-[var(--color-fg)] transition-colors"
+                title="New issue (⌘N)"
+                aria-label="New issue"
+              >
+                <Plus aria-hidden className="size-4" />
+              </button>
+            ) : (
+              <button
+                onClick={() => setNewOpen(true)}
+                className="pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hm-island text-[12px] font-medium text-[var(--color-fg)] hover:bg-[var(--color-bg3)] transition-colors"
+                title="New issue (⌘N)"
+              >
+                <Plus aria-hidden className="size-3.5 text-[var(--color-fg2)]" />
+                <span>New issue</span>
+                <kbd className="font-mono text-[9.5px] text-[var(--color-fg3)] ml-0.5">⌘N</kbd>
+              </button>
+            )
           )}
           <button
             onClick={() => setSettingsOpen(true)}

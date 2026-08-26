@@ -8,7 +8,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { GitBranch, FolderGit2, Plus, LayoutGrid, Server, GitCommitHorizontal } from "lucide-react";
+import { GitBranch, FolderGit2, Plus, LayoutGrid, Server, GitCommitHorizontal, FileText } from "lucide-react";
 import { subscribeStatus, type TileStatusKind } from "./agent-status-bus";
 import { WorktreePicker } from "./WorktreePicker";
 import { useGitBranch } from "./queries";
@@ -416,6 +416,16 @@ export function FrameNode({ id, data, selected }: { id: string; data: FrameNodeD
               {a.label}
             </button>
           ))}
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("hivemind:frame-open-file", { detail: { frameId: data.id } }));
+              setShowAdd(false);
+            }}
+            className="flex items-center gap-2 text-left px-2 py-1 rounded text-[11px] text-[var(--color-fg)] hover:bg-[var(--color-bg4)] w-full"
+          >
+            <FileText size={13} className="shrink-0 text-[var(--color-fg3)]" />
+            File…
+          </button>
           {([
             ["shell", "Terminal"],
             ["tree", "Editor"],
