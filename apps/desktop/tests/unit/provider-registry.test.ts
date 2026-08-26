@@ -81,5 +81,5 @@ test("composeResume restoreRetryMs is the max across providers (≥ claude's 5s)
 });
 
 test("registry order is claude before codex (preserves restore chaining)", () => {
-  assert.deepEqual(PROVIDERS.map((p) => p.id), ["claude", "codex", "droid", "pi"]);
+  assert.deepEqual(PROVIDERS.map((p) => p.id), ["claude", "codex", "droid", "kiro", "pi"]);
 });
