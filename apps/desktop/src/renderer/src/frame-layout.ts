@@ -123,6 +123,57 @@ export function resolveFrameCollisions(
 }
 
 /**
+ * Separate a group of SIBLING frames (worktree children of one repo frame),
+ * returning per-frame {dx,dy}. Two strategies:
+ *
+ *  - ≤2 frames, or already non-overlapping: fall back to
+ *    `resolveFrameCollisions` — a minimal nudge that keeps the anchor put and
+ *    barely moves a neighbour. This preserves free-drag placement.
+ *
+ *  - 3+ OVERLAPPING frames: pairwise nudging picks the smaller-penetration axis
+ *    per collision, which for a row of grown frames scatters them into a diagonal
+ *    stagger (one wraps down, the next stays right, …) — the "nested layers get
+ *    lost / dispersed" bug. Instead reflow them into a stable left→right row
+ *    that wraps past FRAME_ROW_MAX, in READING ORDER of their current top-lefts,
+ *    anchored at the group's top-left. The anchor keeps its slot (the reflow
+ *    origin is the anchor's current corner when present) so the frame you just
+ *    touched doesn't jump.
+ *
+ * Pure — returns deltas; the caller applies them (to member tiles).
+ */
+function separateSiblingFrames(
+  rects: LayoutRect[],
+  anchorId: string | null | undefined,
+  gap: number,
+): Record<string, { dx: number; dy: number }> {
+  const anyOverlap = (() => {
+    for (let i = 0; i < rects.length; i++)
+      for (let j = i + 1; j < rects.length; j++)
+        if (overlaps(rects[i]!, rects[j]!, gap)) return true;
+    return false;
+  })();
+  // ≤2 frames, or nothing overlaps: the minimal-nudge separator is ideal — it
+  // respects free-drag positions and only moves what must move.
+  if (rects.length <= 2 || !anyOverlap) return resolveFrameCollisions(rects, anchorId, gap);
+
+  // 3+ overlapping: reflow into a stable wrapping row in reading order. Origin
+  // = the group's current top-left (or the anchor's corner, so it stays put).
+  const sorted = [...rects].sort((a, b) => a.y - b.y || a.x - b.x || (a.id < b.id ? -1 : 1));
+  const anchor = anchorId ? rects.find((r) => r.id === anchorId) : undefined;
+  const originX = anchor ? anchor.x : Math.min(...rects.map((r) => r.x));
+  const originY = anchor ? anchor.y : Math.min(...rects.map((r) => r.y));
+  const out: Record<string, { dx: number; dy: number }> = {};
+  let x = originX, y = originY, rowH = 0;
+  for (const r of sorted) {
+    if (x > originX && x + r.w - originX > FRAME_ROW_MAX) { x = originX; y += rowH + gap; rowH = 0; }
+    out[r.id] = { dx: Math.round(x - r.x), dy: Math.round(y - r.y) };
+    x += r.w + gap;
+    if (r.h > rowH) rowH = r.h;
+  }
+  return out;
+}
+
+/**
  * Slot for a NEW tile inside a frame. Extends the current top row to the right
  * if the tile still fits within `maxRowWidth` (measured from the leftmost
  * member); otherwise wraps to a fresh row below everything. Top-aligned within
@@ -322,7 +373,7 @@ export function computeFrameLayout(
   for (const [, kids] of childrenOf) {
     if (kids.length < 2) continue; // a lone child can't collide
     const rects: LayoutRect[] = kids.map((c) => ({ id: c.id, ...tBox.get(c.id)! }));
-    const d = resolveFrameCollisions(rects, anchorId, gap);
+    const d = separateSiblingFrames(rects, anchorId, gap);
     for (const c of kids) childDelta.set(c.id, d[c.id] ?? { dx: 0, dy: 0 });
   }
   const childBox = (id: string): Rect => {
