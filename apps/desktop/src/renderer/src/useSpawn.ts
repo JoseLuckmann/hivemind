@@ -19,7 +19,7 @@ import type { TileKind } from "./tile-kinds";
 const SINGLETON_KINDS: ReadonlySet<TileKind> = new Set(["editor", "diff", "issues"]);
 
 type FocusReq = { id: string; cx: number; cy: number; w: number; h: number; n: number; exact?: boolean } | null;
-type SpawnOpts = { mode?: string; work?: string; url?: string; agent?: { id: string; cmd: string; args?: string[]; label: string } };
+type SpawnOpts = { mode?: string; work?: string; url?: string; file?: string; agent?: { id: string; cmd: string; args?: string[]; label: string } };
 type SpawnPick = ({ kind: TileKind } & SpawnOpts) | null;
 
 export interface SpawnCtx {
@@ -247,11 +247,19 @@ export function useSpawn(ctx: SpawnCtx) {
         label = `shell #${n}`;
       } else if (kind === "browser") {
         label = `Browser #${n}`;
+      } else if (kind === "file") {
+        // A single-file tile is named after its file (basename); the full
+        // repo-relative path rides on the TileInstance below.
+        label = opts?.file ? (opts.file.split("/").pop() ?? opts.file) : "File";
       } else {
         label = kind === "editor" ? "Editor" : kind === "diff" ? "Diff" : "Issues";
       }
       placeInFrame(newId, frame);
-      setTiles((cur) => [...cur, { id: newId, kind, label, cmd, args, ...(kind === "browser" && opts?.url ? { url: opts.url } : {}) }]);
+      setTiles((cur) => [...cur, {
+        id: newId, kind, label, cmd, args,
+        ...(kind === "browser" && opts?.url ? { url: opts.url } : {}),
+        ...(kind === "file" && opts?.file ? { file: opts.file } : {}),
+      }]);
       // "Work on this": hand the fresh claude tile its prompt. It delivers it to
       // itself the first time it's ready (see claude-bus queueWork/claimWork).
       if (kind === "claude" && opts?.work) queueWork(newId, opts.work);

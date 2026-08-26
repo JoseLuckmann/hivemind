@@ -28,6 +28,9 @@ export interface TileInstance {
   args?: string[];
   /** browser only — last/initial URL so the tile restores where it was. */
   url?: string;
+  /** file only — the ONE repo-relative file this single-file editor tile edits.
+   *  Persisted so the tile reopens on the same file. */
+  file?: string;
   /** Pinned = the tile becomes a TRUE screen-fixed floating panel: its content is
    *  portaled out of react-flow's transformed viewport into a fixed full-window
    *  layer, so it holds a constant screen position + size, unaffected by canvas

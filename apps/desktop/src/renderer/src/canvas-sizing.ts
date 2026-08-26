@@ -24,6 +24,9 @@ export function defaultSizeForKind(kind: TileKind): { width: number; height: num
     case "editor":
     case "diff":
       return { width: 1400, height: 900 };
+    case "file":
+      // Single-file tile — compact, since it holds one file, not a whole IDE.
+      return { width: 760, height: 560 };
     case "issues":
       return { width: 680, height: 460 };
     case "planReview":
