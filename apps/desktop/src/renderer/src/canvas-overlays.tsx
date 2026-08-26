@@ -4,7 +4,7 @@
  * queue + the spawn actions). Extracted to keep Canvas.tsx focused.
  */
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { AlertCircle, CheckCircle2, AlertTriangle, Sparkles, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, AlertTriangle, Sparkles, X, FolderOpen, FolderPlus } from "lucide-react";
 import { useTileFocus } from "./canvas-camera";
 import { toastKindOf, toastTtlMs, type Toast, type NoticeKind } from "./useAgentAwareness";
 
@@ -212,6 +212,8 @@ export function CanvasEmptyState({
   onShowDiff,
   onSpawnClaude,
   onInitWorkspace,
+  onOpenFolder,
+  onCreateProject,
 }: {
   repoPath: string | null;
   onShowTree: () => void;
@@ -220,6 +222,10 @@ export function CanvasEmptyState({
   onSpawnClaude: () => void;
   /** When set (folder open, no .hivemind/), surface an init action. */
   onInitWorkspace?: () => void;
+  /** Open an existing project folder anywhere (native picker). */
+  onOpenFolder?: () => void;
+  /** Pick a folder then initialize a NEW project there (create anywhere). */
+  onCreateProject?: () => void;
 }) {
   // Hierarchy, not a 4-up card grid: one confident primary action (spawn an
   // agent) sits above a quiet row of secondary surface links. Asymmetry +
@@ -229,21 +235,62 @@ export function CanvasEmptyState({
     { label: "Open workbench", hint: "⌘B", action: onShowTree, disabled: !repoPath },
     { label: "Open diff", hint: "⌘D", action: onShowDiff, disabled: !repoPath },
   ];
+  // No project resolved at all (launched from the app menu with no folder): the
+  // FIRST thing to do is open or create one, so those lead. With a project
+  // already open, spawning an agent leads and project actions drop to the aside.
+  const noProject = !repoPath;
   return (
     <div className="pointer-events-none absolute inset-0 grid place-items-center">
       <div className="pointer-events-auto w-full max-w-[440px] px-8">
-        <div className="u-eyebrow mb-2">Empty canvas</div>
+        <div className="u-eyebrow mb-2">{noProject ? "No project open" : "Empty canvas"}</div>
         <h2 className="text-[20px] font-semibold text-[var(--color-fg)] tracking-tight leading-tight">
-          Start with an agent.
+          {noProject ? "Open or create a project." : "Start with an agent."}
         </h2>
         <p className="text-[12.5px] text-[var(--color-fg2)] mt-1.5 leading-relaxed">
-          Nothing renders until you ask for it. Spawn Claude, or mount a tool below.
+          {noProject
+            ? "Point hivemind at a folder to get issues, a board, diffs, and agents scoped to that repo."
+            : "Nothing renders until you ask for it. Spawn Claude, or mount a tool below."}
         </p>
 
-        {/* Primary: full-width confident action */}
+        {/* Project actions — lead when there's no project; a quieter aside once
+            one is open. Open an EXISTING folder, or create a new project there. */}
+        {noProject && (onOpenFolder || onCreateProject || onInitWorkspace) && (
+          <div className="mt-5 grid gap-2">
+            {onOpenFolder && (
+              <button
+                onClick={onOpenFolder}
+                className="w-full flex items-center gap-3 rounded-lg border border-[var(--color-line2)] bg-[var(--color-bg3)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg4)] transition-colors px-3.5 py-3 text-left group"
+              >
+                <span aria-hidden className="grid place-items-center size-8 shrink-0 rounded-md bg-[var(--color-bg4)] text-[var(--color-brand)] group-hover:bg-[var(--color-brand)] group-hover:text-white transition-colors">
+                  <FolderOpen size={16} />
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[13px] font-medium text-[var(--color-fg)]">Open project…</span>
+                  <span className="block text-[11.5px] text-[var(--color-fg3)] leading-snug">Pick any folder on disk</span>
+                </span>
+              </button>
+            )}
+            {(onCreateProject || onInitWorkspace) && (
+              <button
+                onClick={onCreateProject ?? onInitWorkspace}
+                className="w-full flex items-center gap-3 rounded-lg border border-[var(--color-line2)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg3)] transition-colors px-3.5 py-2.5 text-left group"
+              >
+                <span aria-hidden className="grid place-items-center size-7 shrink-0 rounded-md bg-[var(--color-bg3)] text-[var(--color-warn)] group-hover:bg-[var(--color-brand)] group-hover:text-white transition-colors">
+                  <FolderPlus size={14} />
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[12.5px] font-medium text-[var(--color-fg)]">Create project…</span>
+                  <span className="block text-[11px] text-[var(--color-fg3)] leading-snug">Pick a folder and write a .hivemind/ there</span>
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Primary: full-width confident action (spawn an agent). */}
         <button
           onClick={onSpawnClaude}
-          className="mt-5 w-full flex items-center gap-3 rounded-lg border border-[var(--color-line2)] bg-[var(--color-bg3)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg4)] transition-colors px-3.5 py-3 text-left group"
+          className={`${noProject ? "mt-3" : "mt-5"} w-full flex items-center gap-3 rounded-lg border border-[var(--color-line2)] bg-[var(--color-bg3)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg4)] transition-colors px-3.5 py-3 text-left group`}
         >
           <span aria-hidden className="grid place-items-center size-8 shrink-0 rounded-md bg-[var(--color-bg4)] text-[var(--color-brand)] group-hover:bg-[var(--color-brand)] group-hover:text-white transition-colors">
             <Sparkles size={16} />
@@ -255,16 +302,16 @@ export function CanvasEmptyState({
           <kbd className="font-mono text-[10px] text-[var(--color-fg3)] group-hover:text-[var(--color-fg2)] transition-colors shrink-0">⌘\</kbd>
         </button>
 
-        {/* When launched in a non-hivemind folder, surface init right next to
-            the primary action. This is the empty-state path the removed top-left
-            switcher used to own; the ⌘K palette has the same item too. */}
-        {onInitWorkspace && (
+        {/* With a project open but no .hivemind/, surface init right next to the
+            primary action (the empty-state path the removed top-left switcher
+            used to own; the ⌘K palette has the same item too). */}
+        {!noProject && onInitWorkspace && (
           <button
             onClick={onInitWorkspace}
             className="mt-2 w-full flex items-center gap-3 rounded-lg border border-[var(--color-line2)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg3)] transition-colors px-3.5 py-2.5 text-left group"
           >
             <span aria-hidden className="grid place-items-center size-7 shrink-0 rounded-md bg-[var(--color-bg3)] text-[var(--color-warn)] group-hover:bg-[var(--color-brand)] group-hover:text-white transition-colors">
-              <Sparkles size={14} />
+              <FolderPlus size={14} />
             </span>
             <span className="flex-1 min-w-0">
               <span className="block text-[12.5px] font-medium text-[var(--color-fg)]">Initialize workspace here…</span>

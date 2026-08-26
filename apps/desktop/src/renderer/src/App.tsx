@@ -132,6 +132,21 @@ export function App() {
     setRecents(pushRecent(picked));
     setRootHint(picked);
   }
+  // Create a NEW project anywhere: pick a folder, point the app at it, then open
+  // the init prompt so a .hivemind/ is written THERE (not in process.cwd()).
+  // Covers the "launched from the app menu, no folder" case where the user wants
+  // to start a project in a location of their choosing.
+  async function pickFolderThenInit() {
+    const picked = await window.hive.pickProjectFolder();
+    if (!picked) return;
+    window.localStorage.setItem("hivemind:last-project", picked);
+    setRecents(pushRecent(picked));
+    setRootHint(picked);
+    // The init prompt reads dir from repoPath ?? cwd; setting rootHint makes the
+    // project query repoint to `picked`. Open the prompt on the next tick so it
+    // targets the freshly-picked folder.
+    setTimeout(() => setInitOpen(true), 0);
+  }
   function openRecent(path: string) {
     window.localStorage.setItem("hivemind:last-project", path);
     setRecents(pushRecent(path));
@@ -365,6 +380,7 @@ export function App() {
           repoPath={repoPath}
           root={root}
           onInitWorkspace={!root ? () => setInitOpen(true) : undefined}
+          onOpenFolder={pickFolder}
           updateAvailable={update.status?.updateAvailable === true}
           onUpgrade={update.upgrade}
           upgrading={update.upgrading}

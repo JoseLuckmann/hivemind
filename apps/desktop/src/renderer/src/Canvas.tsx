@@ -91,6 +91,12 @@ interface Props {
    *  CanvasEmptyState can offer "Initialize workspace here…" (the old top-left
    *  switcher's job). Undefined when a workspace is already resolved. */
   onInitWorkspace?: () => void;
+  /** Open an existing project folder anywhere (native picker) — App wires this
+   *  so the empty state can start a project even when launched with no folder
+   *  (e.g. from the application menu). */
+  onOpenFolder?: () => void;
+  /** Pick a folder then initialize a NEW project there (create anywhere). */
+  onCreateProject?: () => void;
   /** A newer GitHub release exists → show the "Update available" pill by Theme.
    *  Owned by App (so the Settings dialog + this pill share one check). */
   updateAvailable?: boolean;
@@ -114,7 +120,7 @@ const SINGLETON_KINDS: ReadonlySet<TileKind> = new Set(["editor", "diff", "issue
 
 // tile sizing helpers + FRAME_* constants moved to canvas-sizing.ts
 
-export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, updateAvailable = false, onUpgrade, upgrading = false }: Props) {
+export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFolder, onCreateProject, updateAvailable = false, onUpgrade, upgrading = false }: Props) {
   // Persistence key for the canvas layout. Prefer repoPath (a git/.hivemind
   // project); fall back to the absolute cwd so a plain folder — including
   // `$HOME` — still persists + resumes. Without this, launching onto any
@@ -645,6 +651,51 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, updateAvai
       window.removeEventListener("hivemind:set-view-mode", onSet as EventListener);
     };
   }, [toggleViewMode]);
+
+  // Ctrl+Tab / Ctrl+Shift+Tab cycles between elements — browser/editor muscle
+  // memory. Windows mode: move through the visible tabs (change the active tab).
+  // Canvas mode: move the tile selection + fly focus to it. Kept in refs so the
+  // capture-phase listener always reads the latest lists without re-binding.
+  const cycleRef = useRef<{ mode: ViewMode; tabs: string[]; active: string | null; canvasTiles: string[]; selected: string | null }>({
+    mode: viewMode, tabs: [], active: activeTabId, canvasTiles: [], selected: selectedTileId,
+  });
+  useEffect(() => {
+    cycleRef.current = {
+      mode: viewMode,
+      active: activeTabId,
+      selected: selectedTileId,
+      tabs: tabTiles.map((t) => t.id),
+      // Canvas mode cycles through every open tile (Layers-panel order).
+      canvasTiles: layerTiles.map((t) => t.id),
+    };
+  }, [viewMode, activeTabId, selectedTileId, tabTiles, layerTiles]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Ctrl+Tab (+Shift) — NOT Cmd+Tab (that's the OS app switcher). Capture
+      // phase so xterm's key handler doesn't swallow it inside a focused terminal.
+      if (e.key !== "Tab" || !e.ctrlKey || e.metaKey || e.altKey) return;
+      const c = cycleRef.current;
+      const list = c.mode === "windows" ? c.tabs : c.canvasTiles;
+      if (list.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const cur = c.mode === "windows" ? c.active : c.selected;
+      const idx = cur ? list.indexOf(cur) : -1;
+      const dir = e.shiftKey ? -1 : 1;
+      // Wrap around; from "none selected" go to first (fwd) or last (back).
+      const next = list[(idx === -1 ? (dir === 1 ? 0 : list.length - 1) : (idx + dir + list.length) % list.length)];
+      if (!next) return;
+      if (c.mode === "windows") {
+        setActiveTabId(next);
+        setSelectedTileId(next);
+      } else {
+        setSelectedTileId(next);
+        focusTile(next, { exact: true });
+      }
+    };
+    window.addEventListener("keydown", onKey, true); // capture
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [focusTile]);
 
   // Permission mode the next Claude spawn launches in. Verified flag values
   // (code.claude.com/docs cli-reference): default | acceptEdits | plan | auto |
@@ -1657,6 +1708,8 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, updateAvai
             onShowDiff={() => spawnVis("diff")}
             onSpawnClaude={() => spawnClaude()}
             onInitWorkspace={onInitWorkspace}
+            onOpenFolder={onOpenFolder}
+            onCreateProject={onCreateProject}
           />
         )}
         <RemoteConnectModal

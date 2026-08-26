@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { AGENTS } from "./agents";
 import { WorktreePicker } from "./WorktreePicker";
+import { OPEN_KINDS } from "./spawn-icons";
 import type { LayerFrame } from "./LayersPanel";
 
 /** Everything the rail needs to drive a frame — supplied by Canvas. */
@@ -169,6 +170,8 @@ export function FrameRailMenu({
         </SubmenuRow>
 
         <SubmenuRow icon={<Plus size={13} />} label="Open" open={sub === "open"} onOpen={() => setSub("open")}>
+          {OPEN_KINDS.map(({ kind, label, icon: Icon }) => (
+            <Item key={kind} icon={<Icon size={13} />} label={label} onClick={() => { actions.onOpenInFrame(fid, kind); close(); }} />
           <Item icon={<FileText size={13} />} label="File…" onClick={() => { actions.onOpenFilePicker(fid); close(); }} />
           {([
             ["shell", "Terminal"],
