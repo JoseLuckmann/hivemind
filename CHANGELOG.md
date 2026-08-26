@@ -7,6 +7,26 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+### Added
+
+- **Windowed ("editor-like") view mode.** Switch the canvas into a VS Code-style layout
+  (⌘E, or from **Settings ▸ View**): the graph rail stays on the left, a single tab strip
+  runs across the top with each tab tinted by its frame's color, and the active tile fills
+  the rest. Tabs can be **minimized** — hidden from the strip but still present in the graph
+  rail, one click away from being restored. The tile bodies render from the same data as the
+  canvas, so switching modes keeps live agent sessions intact (terminals reattach to their
+  PTY). The mode preference persists globally; the minimized set persists per repo.
+- **Right-click a frame in the Layers rail** for a nested context menu that mirrors the
+  on-canvas frame header — Spawn agent ▸, Open ▸ (terminal/editor/diff/issues/browser),
+  Git ▸, Worktree ▸, Workspace ▸ (bind folder / attach SSH remote), Arrange ▸, plus inline
+  Rename, Color, and Delete. Submenus keep the list short as more agents/actions are added.
+  Works in both view modes.
+- **Commit, push, and pull from the app.** Every repo frame's header (and the rail's
+  **Git ▸ Commit…**) opens a commit dialog scoped to that frame's repo/worktree: a summary +
+  optional description, a "stage all changes" toggle, a live status line (branch, staged
+  count, ahead/behind), and **Commit**, **Commit & Push**, **Push**, and **Pull** actions.
+  Pull is fast-forward-only and reports a diverged branch cleanly instead of forcing a merge.
+
 ### Fixed
 
 - **Tiles now stay glued to their frame.** A newly-placed tile (editor, diff, terminal)
