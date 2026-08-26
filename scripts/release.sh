@@ -72,7 +72,10 @@ case "$ARG" in
     ;;
   *) NEXT="$ARG" ;;
 esac
-[[ "$NEXT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid next version: $NEXT"
+# Allow an optional semver pre-release suffix (e.g. 1.16.0-flow.1). This fork cuts
+# its own releases under a "-flow" codename so its versions never collide with
+# upstream's plain X.Y.Z tags — see .gitattributes for the merge=ours guard.
+[[ "$NEXT" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || die "invalid next version: $NEXT"
 TAG="v$NEXT"
 say "next version:    $NEXT  (tag: $TAG)"
 

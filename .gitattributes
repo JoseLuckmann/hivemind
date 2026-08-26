@@ -1,0 +1,21 @@
+# Fork versioning guard.
+#
+# This fork (JoseLuckmann/hivemind) cuts its own releases with a "-flow" pre-release
+# suffix (e.g. 1.16.0-flow.1). The release process edits the `version` field in every
+# package.json and prepends a section to CHANGELOG.md — the exact same lines upstream
+# (dip497/hivemind) also edits on every one of its releases.
+#
+# Left alone, `git merge upstream/main` would collide on these files on EVERY upstream
+# release, forever. The `merge=ours` driver tells git to KEEP OUR version of these files
+# during a merge, dropping the incoming upstream change for them only. All other files
+# (the actual code) merge normally, so we still get upstream's features — we just keep
+# our own version numbers and changelog.
+#
+# NOTE: `merge=ours` requires the driver to be registered locally (it is not stored in
+# the repo). Run once per clone:
+#     git config merge.ours.driver true
+# (the installer/release flow does this; see scripts/release.sh header).
+
+CHANGELOG.md      merge=ours
+package.json      merge=ours
+**/package.json   merge=ours
