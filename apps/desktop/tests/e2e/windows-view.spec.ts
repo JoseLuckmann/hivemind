@@ -139,3 +139,32 @@ test("frame header shows a git button", async () => {
   await expect(frame).toBeVisible();
   await expect(frame.getByRole("button", { name: "git" }).first()).toBeVisible();
 });
+
+test("Ctrl+Tab cycles tabs in windows mode", async () => {
+  // Ensure ≥2 terminals, then enter windows mode.
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("hivemind:canvas-toggle", { detail: "shell" })));
+  await page.waitForTimeout(300);
+  // Enter windows mode (idempotent set via toggle if currently canvas).
+  const inWindows = await page.locator('[role="tablist"]').count();
+  if (inWindows === 0) {
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent("hivemind:set-view-mode", { detail: { mode: "windows" } })));
+    await page.waitForSelector('[role="tablist"]');
+  }
+  const tabs = page.locator('[role="tab"]');
+  const count = await tabs.count();
+  expect(count).toBeGreaterThanOrEqual(2);
+  // Note which tab is selected, Ctrl+Tab, expect a DIFFERENT one selected.
+  const before = await page.locator('[role="tab"][aria-selected="true"]').getAttribute("title");
+  await page.keyboard.press("Control+Tab");
+  await page.waitForTimeout(150);
+  const after = await page.locator('[role="tab"][aria-selected="true"]').getAttribute("title");
+  expect(after).not.toBe(before);
+  // Ctrl+Shift+Tab goes back to the original.
+  await page.keyboard.press("Control+Shift+Tab");
+  await page.waitForTimeout(150);
+  const back = await page.locator('[role="tab"][aria-selected="true"]').getAttribute("title");
+  expect(back).toBe(before);
+  // Return to canvas for later tests' assumptions.
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("hivemind:set-view-mode", { detail: { mode: "canvas" } })));
+  await page.waitForSelector(".react-flow");
+});

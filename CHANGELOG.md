@@ -9,6 +9,16 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ### Added
 
+- **Open or create a project from the empty state.** Launched with no folder (e.g. from the
+  application menu), the canvas now leads with **Open project…** (pick any folder) and
+  **Create project…** (pick a folder and write a `.hivemind/` there), so you can start using
+  issues, the board, diffs, and agents without the CLI.
+- **Ctrl+Tab / Ctrl+Shift+Tab to move between elements.** In windows mode it cycles the open
+  tabs; in canvas mode it moves the tile selection and flies focus to it. Works even with a
+  terminal focused (captured before xterm).
+- **Icons on the spawn menus.** Terminal, Editor, Diff, Issues, and Browser now carry
+  consistent lucide icons in both the frame header **+** menu and the rail context menu's
+  **Open** submenu (agents already showed their own logos).
 - **Windowed ("editor-like") view mode.** Switch the canvas into a VS Code-style layout
   (⌘E, or from **Settings ▸ View**): the graph rail stays on the left, a single tab strip
   runs across the top with each tab tinted by its frame's color, and the active tile fills

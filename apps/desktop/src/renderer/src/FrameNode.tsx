@@ -14,6 +14,7 @@ import { WorktreePicker } from "./WorktreePicker";
 import { useGitBranch } from "./queries";
 import { isRemote, parseRemote, remoteBasename, remoteDisplay } from "../../shared/remote-uri";
 import { AGENTS } from "./agents";
+import { OPEN_KIND_ICON } from "./spawn-icons";
 import type { ArrangeMode } from "./frame-layout";
 import type { WorktreeEntry } from "../../shared/ipc";
 
@@ -428,8 +429,9 @@ export function FrameNode({ id, data, selected }: { id: string; data: FrameNodeD
                 window.dispatchEvent(new CustomEvent("hivemind:frame-open", { detail: { frameId: data.id, kind } }));
                 setShowAdd(false);
               }}
-              className="text-left px-2 py-1 rounded text-[11px] text-[var(--color-fg)] hover:bg-[var(--color-bg4)] w-full"
+              className="flex items-center gap-2 text-left px-2 py-1 rounded text-[11px] text-[var(--color-fg)] hover:bg-[var(--color-bg4)] w-full"
             >
+              {(() => { const Icon = OPEN_KIND_ICON[kind] ?? Plus; return <Icon size={13} className="shrink-0 text-[var(--color-fg3)]" />; })()}
               {label}
             </button>
           ))}
