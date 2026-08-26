@@ -172,6 +172,7 @@ export function FrameRailMenu({
         <SubmenuRow icon={<Plus size={13} />} label="Open" open={sub === "open"} onOpen={() => setSub("open")}>
           {OPEN_KINDS.map(({ kind, label, icon: Icon }) => (
             <Item key={kind} icon={<Icon size={13} />} label={label} onClick={() => { actions.onOpenInFrame(fid, kind); close(); }} />
+          ))}
           <Item icon={<FileText size={13} />} label="File…" onClick={() => { actions.onOpenFilePicker(fid); close(); }} />
           {([
             ["shell", "Terminal"],
