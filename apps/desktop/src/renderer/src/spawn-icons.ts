@@ -9,7 +9,7 @@
  * own icons from the agent registry, so they're not here.
  */
 import type { LucideIcon } from "lucide-react";
-import { SquareTerminal, FileCode2, GitCompare, KanbanSquare, Globe } from "lucide-react";
+import { SquareTerminal, FileCode2, GitCompare, KanbanSquare, Globe, FolderTree, Play, Zap } from "lucide-react";
 
 /** The non-agent "open in zone" kinds, in a stable menu order, with a label +
  *  icon. Consumed by FrameNode's "+" menu and FrameRailMenu's "Open" submenu. */
@@ -19,6 +19,9 @@ export const OPEN_KINDS: { kind: string; label: string; icon: LucideIcon }[] = [
   { kind: "diff", label: "Diff", icon: GitCompare },
   { kind: "issues", label: "Issues", icon: KanbanSquare },
   { kind: "browser", label: "Browser", icon: Globe },
+  { kind: "explorer", label: "Explorer", icon: FolderTree },
+  { kind: "cmdButton", label: "Command button", icon: Play },
+  { kind: "trigger", label: "Trigger", icon: Zap },
 ];
 
 /** Kind → icon lookup (same source as OPEN_KINDS) for call sites that keep their

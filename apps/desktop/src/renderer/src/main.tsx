@@ -13,6 +13,15 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "@fontsource/jetbrains-mono/700.css";
+// Self-host Geist (sans body+display) too — same rationale as JetBrains Mono:
+// offline-safe, no CDN round-trip, and (crucially) no CSS `@import url(...)`
+// after Tailwind/xyflow rules, which Vite rejects ("@import must precede all
+// other statements"). Weights match the old CDN request (300–700).
+import "@fontsource/geist-sans/300.css";
+import "@fontsource/geist-sans/400.css";
+import "@fontsource/geist-sans/500.css";
+import "@fontsource/geist-sans/600.css";
+import "@fontsource/geist-sans/700.css";
 import "./styles.css";
 
 const queryClient = new QueryClient({

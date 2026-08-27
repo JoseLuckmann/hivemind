@@ -219,3 +219,39 @@ export function clearStatus(tileId: string): void {
 export function statusOf(tileId: string): TileStatusKind | null {
   return effective(tileId)?.status ?? null;
 }
+
+/** Best-effort "this tile's current turn finished" wait for HOOKLESS agents
+ *  (codex, kiro, …) — the canvas workflow engine's fallback for a step whose
+ *  target isn't in `agent-state.ts`'s `HOOK_CAPABLE_AGENTS`, where
+ *  `TurnTracker.waitForTurn`/`agent.read` can never resolve (no deterministic
+ *  turn signal exists for these providers). Resolves `true` once the tile is
+ *  observed transitioning to a REAL (non-synthetic — see `StatusEvent.synthetic`)
+ *  idle, either after an observed "working" or after `minElapsedMs` has
+ *  passed since the call (covers a poll cadence too coarse to catch a fast
+ *  turn's working blip, and the immediate replay `subscribeStatus` gives a
+ *  fresh subscriber of the tile's PRE-existing resting state). Resolves
+ *  `false` on timeout. There is no clean reply text for these providers —
+ *  the caller gets only "done", never "here's what it said". */
+export function waitForIdle(
+  tileId: string,
+  { timeoutMs, minElapsedMs = 2000 }: { timeoutMs: number; minElapsedMs?: number },
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    let sawWorking = statusOf(tileId) === "working";
+    let timer: ReturnType<typeof setTimeout>;
+    const done = (v: boolean) => {
+      clearTimeout(timer);
+      unsub();
+      resolve(v);
+    };
+    const unsub = subscribeStatus((e) => {
+      if (e.tileId !== tileId) return;
+      if (e.status === "working") { sawWorking = true; return; }
+      if (e.status === "idle" && !e.synthetic && (sawWorking || Date.now() - start >= minElapsedMs)) {
+        done(true);
+      }
+    });
+    timer = setTimeout(() => done(false), timeoutMs);
+  });
+}

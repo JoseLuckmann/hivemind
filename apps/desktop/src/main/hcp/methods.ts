@@ -116,6 +116,11 @@ export interface MethodDeps {
    *  text actually reaches the terminal (which is when an approval's answer-clock
    *  should start). Returns false only if the tile's pty is dead. */
   deliverToTile: (ptyId: string, text: string, onSent?: () => void) => boolean;
+  /** True iff the tile has a live pty (local session or remote). The canvas
+   *  workflow engine calls this (via the `agent.alive` verb) BEFORE a step's
+   *  `agent.send` so it can (re)spawn a dead/never-spawned agent tile and wait
+   *  for it to come up, instead of failing the run with TILE_NOT_FOUND. */
+  isAlive: (tileId: string) => boolean;
   turns: TurnTracker;
   recorder: OutputRecorder;
   /** Sliding-window spawn gate (reuse the ptySpawn rate-limit). false → refuse. */
@@ -307,6 +312,15 @@ export function makeDispatch(deps: MethodDeps): Dispatcher {
           callerTile: p.callerTile, report: p.report, supervise: p.supervise,
         });
         return { tileId };
+      }
+
+      case "agent.alive": {
+        // Liveness probe for a tile's pty. Used by the canvas workflow engine to
+        // decide whether it must (re)spawn an agent tile before delivering a step's
+        // prompt. Never throws on a missing tile — absence IS the answer (alive:false).
+        const tileId = String(p.tileId ?? "");
+        if (!tileId) throw new HcpError("BAD_REQUEST", "tileId required");
+        return { alive: deps.isAlive(bareOf(tileId)) };
       }
 
       case "agent.send": {

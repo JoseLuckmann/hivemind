@@ -2,8 +2,10 @@
 import type { Issue, IssueSummary, IssueState, AcceptanceItem, Assignee, LinkType, IssuePatch } from "@hivemind/core/types";
 import type { SyncReport } from "@hivemind/core/sync";
 import type { NotificationSettings } from "./notification-settings.js";
+import type { CmdButtonState } from "./command-button.js";
 export type { NotificationSettings };
 export type { SyncReport };
+export type { CmdButtonState, CmdButtonStatus } from "./command-button.js";
 
 // IssuePatch is owned by @hivemind/core/types (node-free) — re-export so renderer
 // modules keep importing it from the IPC contract, with no hand-maintained copy.
@@ -211,6 +213,19 @@ export interface HiveIpc {
    *  resolveProject(picked) to repoint the canvas + sidebar at the chosen
    *  workspace without restarting the app. */
   pickProjectFolder(): Promise<string | null>;
+  /** Show a native folder picker for an arbitrary purpose (e.g. the File
+   *  Explorer tile's "change folder"). Same dialog as pickProjectFolder,
+   *  just not tied to "open a project" semantics — a neutral title + an
+   *  optional starting directory. Returns the picked path, or null if the
+   *  user cancelled. */
+  pickFolder(opts?: { title?: string; defaultPath?: string }): Promise<string | null>;
+  /** Start (or confirm) a chokidar watcher on an arbitrary path — emits
+   *  `fs:changed:<path>` (subscribe via onFsChanged) on add/change/unlink.
+   *  Idempotent: safe to call repeatedly for the same path. Used by the File
+   *  Explorer tile so a folder outside the app's main resolved repo (e.g. a
+   *  worktree, or any folder an agent writes into) is guaranteed to be live,
+   *  not just the single repo `resolveProject` auto-watches. */
+  watchPath(path: string): Promise<void>;
   /** Create a .hivemind/ workspace in `dir` with the given issue prefix.
    *  Returns the new root path. Renderer should re-resolve afterwards. */
   initWorkspace(dir: string, prefix: string): Promise<{ root: string }>;
@@ -417,6 +432,32 @@ export interface HiveIpc {
   /** Reply to a main→renderer HCP command (a control-plane verb that needs the
    *  canvas, e.g. tile.spawn_agent). `id` correlates with the pushed command. */
   hcpResult(id: string, ok: boolean, result?: unknown, errorMessage?: string): Promise<void>;
+
+  /** Call an HCP control-plane verb (e.g. `agent.send`, `agent.read`,
+   *  `tile.connect`) directly from the renderer — the same `dispatch(method,
+   *  params)` the unix-socket MCP server already exercises for every
+   *  `mcp__hive__*` tool. Used by the canvas workflow engine to deliver a
+   *  step's prompt and deterministically await the tile's turn, without
+   *  reinventing TurnTracker/the Mailbox. Throws if the verb errors (mirrors
+   *  HcpError on the wire). */
+  hcpInvoke(method: string, params?: unknown): Promise<unknown>;
+
+  // ── Command Button tile ───────────────────────────────────
+  /** Run a Command Button's saved bash script in the background (no terminal).
+   *  `cwd` scopes it to a workspace/frame folder. No-op if a run is already in
+   *  flight for this tile. State transitions arrive via `onCmdState`. */
+  cmdRun(tileId: string, script: string, cwd?: string): Promise<{ started: boolean }>;
+  /** Stop a running script (SIGTERM). No-op if idle. */
+  cmdStop(tileId: string): void;
+  /** Clear a done/error badge back to idle (no-op while running). */
+  cmdReset(tileId: string): void;
+  /** Current runner state — read on tile (re)mount so a button that opens
+   *  mid-run shows the live state (window reload doesn't lose it). */
+  cmdGetState(tileId: string): Promise<CmdButtonState>;
+  /** Captured stdout+stderr tail of the last/current run (for "show output"). */
+  cmdGetOutput(tileId: string): Promise<string>;
+  /** Tile closed — kill any live process + drop the runner. */
+  cmdDispose(tileId: string): void;
 }
 
 /** A control-plane verb main asks the renderer to execute (request-id correlated
@@ -537,4 +578,5 @@ export type IpcChannel =
   | keyof HiveIpc
   | `pty:data:${string}`
   | `pty:exit:${string}`
+  | `cmd:state:${string}`
   | `fs:changed:${string}`;

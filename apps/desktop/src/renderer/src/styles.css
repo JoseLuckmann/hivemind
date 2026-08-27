@@ -3,10 +3,10 @@
 @import "@xterm/xterm/css/xterm.css";
 @import "@xyflow/react/dist/style.css";
 
-/* Geist (sans body+display). JetBrains Mono (code/paths/IDs + terminals) is
-   SELF-HOSTED via @fontsource (imported in main.tsx) so it's offline-safe and
-   loads before xterm measures it — no flash-of-fallback. Geist stays on the CDN. */
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&display=swap");
+/* Geist (sans body+display) and JetBrains Mono (code/paths/IDs + terminals) are
+   both SELF-HOSTED via @fontsource (imported in main.tsx) so they're offline-safe
+   and load before xterm measures them — no flash-of-fallback, and no CDN
+   `@import url(...)` landing after Tailwind/xyflow rules (Vite rejects that). */
 
 @custom-variant dark (&:is(.dark *));
 
@@ -148,7 +148,7 @@
   --color-state-done:      oklch(0.70 0.19 152);       /* green-700 */
   --color-state-cancelled: oklch(0.52 0.01 230);       /* neutral grey */
 
-  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-sans: "Geist Sans", "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace;
 
   /* Elevation tokens — Plane uses layered translucent shadows; Linear uses a
@@ -629,11 +629,18 @@ body.canvas-resizing .react-flow__node * {
   transition: none !important;
 }
 
-/* Selected-tile indicator. NOT a full outline (too loud) — just a small accent
-   "clip" centered above the top edge, so selection reads clean. Visible when
-   idle; the motion `contain` rules clip it during pan/drag, which is fine. */
+/* Selected-tile indicator. A clear brand ring + soft glow around the whole
+   tile so the selected component (terminal, agent terminal, editor, …) stands
+   out at a glance, plus a small accent "clip" centered above the top edge as a
+   secondary cue. The ring is drawn with box-shadow (no layout shift) and is
+   stripped during motion by the `.canvas-moving/-dragging/-resizing` rules. */
 .react-flow__node .hm-node-selected {
   position: relative;
+  border-radius: 0.75rem; /* match tile rounded-xl so the ring hugs the card */
+  box-shadow:
+    0 0 0 2px var(--color-brand),
+    0 0 0 4px color-mix(in srgb, var(--color-brand) 28%, transparent),
+    0 0 22px -2px color-mix(in srgb, var(--color-brand) 55%, transparent);
 }
 .react-flow__node .hm-node-selected::after {
   content: "";

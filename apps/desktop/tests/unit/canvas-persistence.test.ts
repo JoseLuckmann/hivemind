@@ -92,3 +92,26 @@ test("corrupt JSON → safe empty layout (no throw)", () => {
   const l = loadLayout(repo);
   assert.deepEqual(l.frames, []);
 });
+
+test("workflowEdges + trigger config round-trip; absent on old layouts defaults to []", () => {
+  const repo = "/tmp/repo6";
+  saveLayout(repo, {
+    sizes: {}, positions: {}, frames: [], tileNames: {}, editorTabs: {}, frameOf: {}, viewport: undefined,
+    tiles: [
+      { id: "trig", kind: "trigger", label: "Start", trigger: { mode: "schedule", everyMs: 1_800_000 } },
+      { id: "a", kind: "claude", label: "agent" },
+    ],
+    workflowEdges: [{ id: "wf-1", source: "trig", target: "a", prompt: "go", includePrevReply: true }],
+  });
+  const l = loadLayout(repo);
+  assert.deepEqual(l.workflowEdges, [{ id: "wf-1", source: "trig", target: "a", prompt: "go", includePrevReply: true }]);
+  assert.deepEqual(l.tiles?.find((t) => t.id === "trig")?.trigger, { mode: "schedule", everyMs: 1_800_000 });
+
+  // A layout saved before this feature existed has no `workflowEdges` key at
+  // all — must default to [] rather than undefined (additive-field pattern,
+  // same as frames/positions).
+  const repo2 = "/tmp/repo7";
+  store.set(LAYOUT_KEY(repo2), JSON.stringify({ frames: [], tiles: [{ id: "a", kind: "shell", label: "" }] }));
+  const l2 = loadLayout(repo2);
+  assert.deepEqual(l2.workflowEdges, []);
+});

@@ -19,7 +19,7 @@ import type { TileKind } from "./tile-kinds";
 const SINGLETON_KINDS: ReadonlySet<TileKind> = new Set(["editor", "diff", "issues"]);
 
 type FocusReq = { id: string; cx: number; cy: number; w: number; h: number; n: number; exact?: boolean } | null;
-type SpawnOpts = { mode?: string; work?: string; url?: string; file?: string; agent?: { id: string; cmd: string; args?: string[]; label: string } };
+type SpawnOpts = { mode?: string; work?: string; url?: string; file?: string; folder?: string; agent?: { id: string; cmd: string; args?: string[]; label: string } };
 type SpawnPick = ({ kind: TileKind } & SpawnOpts) | null;
 
 export interface SpawnCtx {
@@ -247,10 +247,24 @@ export function useSpawn(ctx: SpawnCtx) {
         label = `shell #${n}`;
       } else if (kind === "browser") {
         label = `Browser #${n}`;
+      } else if (kind === "cmdButton") {
+        // A command button is named by the user in the create modal; use a
+        // neutral placeholder until they set it (Canvas opens the modal right
+        // after spawn and renames via tileNames).
+        label = "Command";
+      } else if (kind === "trigger") {
+        // Same create-then-rename dance as cmdButton — Canvas opens the config
+        // modal right after spawn.
+        label = "Trigger";
       } else if (kind === "file") {
         // A single-file tile is named after its file (basename); the full
         // repo-relative path rides on the TileInstance below.
         label = opts?.file ? (opts.file.split("/").pop() ?? opts.file) : "File";
+      } else if (kind === "explorer") {
+        // An explorer is named after its bound folder (basename) when one was
+        // picked up front; otherwise it defaults to the frame's repo (set by
+        // canvas-node-build) and just reads "Explorer" until renamed.
+        label = opts?.folder ? (opts.folder.split("/").filter(Boolean).pop() ?? opts.folder) : "Explorer";
       } else {
         label = kind === "editor" ? "Editor" : kind === "diff" ? "Diff" : "Issues";
       }
@@ -259,6 +273,7 @@ export function useSpawn(ctx: SpawnCtx) {
         id: newId, kind, label, cmd, args,
         ...(kind === "browser" && opts?.url ? { url: opts.url } : {}),
         ...(kind === "file" && opts?.file ? { file: opts.file } : {}),
+        ...(kind === "explorer" && opts?.folder ? { folder: opts.folder } : {}),
       }]);
       // "Work on this": hand the fresh claude tile its prompt. It delivers it to
       // itself the first time it's ready (see claude-bus queueWork/claimWork).
@@ -315,7 +330,7 @@ export function useSpawn(ctx: SpawnCtx) {
     }
     const k: TileKind =
       kind === "tree" ? "editor"
-      : kind === "claude" || kind === "shell" || kind === "diff" || kind === "issues" || kind === "browser" ? kind
+      : kind === "claude" || kind === "shell" || kind === "diff" || kind === "issues" || kind === "browser" || kind === "explorer" ? kind
       : "shell";
     spawnTile(k, frameId);
   }, [spawnTile]);
