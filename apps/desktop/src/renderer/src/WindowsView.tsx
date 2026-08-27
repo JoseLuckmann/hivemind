@@ -35,6 +35,8 @@ const KIND_GLYPH: Record<LayerTile["kind"], string> = {
   planReview: "▤",
   workbench: "▥",
   file: "≡",
+  cmdButton: "▶",
+  trigger: "⚡",
 };
 
 function TabGlyph({ tile }: { tile: LayerTile }): ReactNode {

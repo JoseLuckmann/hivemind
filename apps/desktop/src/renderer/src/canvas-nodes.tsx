@@ -15,10 +15,10 @@
  */
 import {
   memo, useCallback, useContext, useEffect, useRef, useState, lazy, Suspense,
-  createContext, type ReactNode,
+  createContext, type ReactNode, type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
-import { NodeResizer, useReactFlow, type NodeTypes } from "@xyflow/react";
+import { Handle, NodeResizer, Position, useReactFlow, type NodeTypes } from "@xyflow/react";
 import { Pin, X } from "lucide-react";
 import { clampAnchor } from "./pin-anchor";
 import { TerminalTile } from "./TerminalTile";
@@ -26,8 +26,21 @@ import { BrowserTile } from "./BrowserTile";
 import { IssuesTile } from "./IssuesTile";
 import { PlanReviewTile } from "./PlanReviewTile";
 import { FileTile } from "./FileTile";
+import { CommandButtonTile } from "./CommandButtonTile";
+import { TriggerTile } from "./TriggerTile";
 import { FrameNode, type FrameNodeData } from "./FrameNode";
 import { TileErrorBoundary } from "./TileErrorBoundary";
+
+// Shared visual for every workflow <Handle> (trigger/agent/cmdButton connect
+// points) — small + quiet at rest, matching the muted line-color vocabulary
+// the rest of the canvas chrome uses (see canvas-pipe-edge.tsx's SpawnEdge).
+const WORKFLOW_HANDLE_STYLE: CSSProperties = {
+  width: 10,
+  height: 10,
+  background: "var(--color-brand)",
+  border: "2px solid var(--color-bg)",
+  zIndex: 30,
+};
 
 const DiffTile = lazy(() => import("./DiffTile").then((m) => ({ default: m.DiffTile })));
 const WorkbenchTile = lazy(() => import("./WorkbenchTile").then((m) => ({ default: m.WorkbenchTile })));
@@ -48,6 +61,9 @@ type TerminalNodeData = {
   args?: string[];
   label?: string;
   name?: string;
+  /** Recognized agent CLI (identifyAgent(cmd) != null) — gates the workflow
+   *  connect handles. A plain shell has no "turn" for agent.send/read to await. */
+  isAgent?: boolean;
   onRename?: (id: string, name: string) => void;
   onAgentTitle?: (id: string, title: string) => void;
   onOpenInBrowser?: (url: string) => void;
@@ -647,6 +663,38 @@ export function TileBody({
           />
         </TileErrorBoundary>
       );
+    case "cmdButton":
+      return (
+        <TileErrorBoundary label="Command" onClose={data.onClose as (() => void) | undefined}>
+          <CommandButtonTile
+            tileId={data.tileId as string}
+            name={data.name as string}
+            script={data.script as string}
+            cwd={data.cwd as string | null}
+            onEdit={data.onEdit as () => void}
+            onClose={data.onClose as () => void}
+            pinned={data.pinned as boolean | undefined}
+            onTogglePin={data.onTogglePin as never}
+          />
+        </TileErrorBoundary>
+      );
+    case "trigger":
+      return (
+        <TileErrorBoundary label="Trigger" onClose={data.onClose as (() => void) | undefined}>
+          <TriggerTile
+            tileId={data.tileId as string}
+            name={data.name as string}
+            mode={data.mode as "manual" | "schedule"}
+            everyMs={data.everyMs as number | undefined}
+            run={data.run as { status: "idle" | "running" | "done" | "error"; note?: string }}
+            onRun={data.onRun as () => void}
+            onEdit={data.onEdit as () => void}
+            onClose={data.onClose as () => void}
+            pinned={data.pinned as boolean | undefined}
+            onTogglePin={data.onTogglePin as never}
+          />
+        </TileErrorBoundary>
+      );
     case "browser":
       return (
         <TileErrorBoundary label="Browser" onClose={data.onClose as (() => void) | undefined}>
@@ -696,9 +744,17 @@ const TerminalNode = memo(function TerminalNode({
 }) {
   const wheelRef = useTileWheelZoom(selected);
   return (
-    <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} wheelRef={wheelRef}>
-      <TileBody type="terminal" data={data as unknown as Record<string, unknown>} selected={selected} />
-    </TileShell>
+    <>
+      {/* Workflow connect points — only a recognized agent CLI can be a
+          workflow step (see TerminalNodeData.isAgent). A step can both
+          receive a prompt (target, from a trigger or a prior agent) and hand
+          off to the next step (source). */}
+      {data.isAgent && <Handle type="target" position={Position.Left} style={WORKFLOW_HANDLE_STYLE} />}
+      <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} wheelRef={wheelRef}>
+        <TileBody type="terminal" data={data as unknown as Record<string, unknown>} selected={selected} />
+      </TileShell>
+      {data.isAgent && <Handle type="source" position={Position.Right} style={WORKFLOW_HANDLE_STYLE} />}
+    </>
   );
 });
 
@@ -756,6 +812,68 @@ const FileNode = memo(function FileNode({
     <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={360} minHeight={220} wheelRef={wheelRef}>
       <TileBody type="file" data={data as unknown as Record<string, unknown>} selected={selected} />
     </TileShell>
+  );
+});
+
+type CmdButtonNodeData = {
+  tileId: string;
+  name: string;
+  script: string;
+  cwd: string | null;
+  onEdit: () => void;
+  onClose?: () => void;
+};
+const CmdButtonNode = memo(function CmdButtonNode({
+  id,
+  data,
+  selected,
+}: {
+  id: string;
+  data: WithResize<CmdButtonNodeData>;
+  selected: boolean;
+}) {
+  const wheelRef = useTileWheelZoom(selected);
+  return (
+    <>
+      {/* Terminal workflow step — receives a run request, never hands off
+          further (v1: no outgoing edges from an action tile). */}
+      <Handle type="target" position={Position.Left} style={WORKFLOW_HANDLE_STYLE} />
+      <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={220} minHeight={150} wheelRef={wheelRef}>
+        <TileBody type="cmdButton" data={data as unknown as Record<string, unknown>} selected={selected} />
+      </TileShell>
+    </>
+  );
+});
+
+type TriggerNodeData = {
+  tileId: string;
+  name: string;
+  mode: "manual" | "schedule";
+  everyMs?: number;
+  run: { status: "idle" | "running" | "done" | "error"; note?: string };
+  onRun: () => void;
+  onEdit: () => void;
+  onClose?: () => void;
+};
+const TriggerNode = memo(function TriggerNode({
+  id,
+  data,
+  selected,
+}: {
+  id: string;
+  data: WithResize<TriggerNodeData>;
+  selected: boolean;
+}) {
+  const wheelRef = useTileWheelZoom(selected);
+  return (
+    <>
+      <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={220} minHeight={150} wheelRef={wheelRef}>
+        <TileBody type="trigger" data={data as unknown as Record<string, unknown>} selected={selected} />
+      </TileShell>
+      {/* Workflow entry point — hands off to the first step only, never
+          receives (a trigger has no upstream). */}
+      <Handle type="source" position={Position.Right} style={WORKFLOW_HANDLE_STYLE} />
+    </>
   );
 });
 
@@ -843,6 +961,8 @@ export const nodeTypes: NodeTypes = {
   diff: DiffNode as unknown as NodeTypes[string],
   workbench: WorkbenchNode as unknown as NodeTypes[string],
   file: FileNode as unknown as NodeTypes[string],
+  cmdButton: CmdButtonNode as unknown as NodeTypes[string],
+  trigger: TriggerNode as unknown as NodeTypes[string],
   issues: IssuesNode as unknown as NodeTypes[string],
   browser: BrowserNode as unknown as NodeTypes[string],
   planReview: PlanReviewNode as unknown as NodeTypes[string],

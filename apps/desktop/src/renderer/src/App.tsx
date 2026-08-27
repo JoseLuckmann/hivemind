@@ -174,6 +174,14 @@ export function App() {
   // where we still discovered a .git/ ancestor); fall back to deriving from
   // root for older builds.
   const repoPath = project?.repoPath ?? (root ? path.dirname(root) : null);
+  // Whether the OPENED folder has its own `.hivemind/` (vs one inherited from an
+  // ancestor that `findRoot` walked up to). `root` being truthy doesn't mean the
+  // folder you opened is initialized — opening a sub/sibling folder resolves an
+  // ancestor's root. Compare the resolved root against `<cwd>/.hivemind`: if they
+  // differ, this folder isn't initialized in its own right, so we still offer
+  // "Initialize here" (just placed discreetly). If cwd is unknown, fall back to
+  // the old `!root` behavior.
+  const openedFolderInitialized = cwd ? root === path.join(cwd, ".hivemind") : !!root;
   useFsChangedInvalidation(repoPath, root);
   const { data: issues = [] } = useIssues(root);
 
@@ -379,7 +387,7 @@ export function App() {
           cwd={cwd}
           repoPath={repoPath}
           root={root}
-          onInitWorkspace={!root ? () => setInitOpen(true) : undefined}
+          onInitWorkspace={!openedFolderInitialized ? () => setInitOpen(true) : undefined}
           onOpenFolder={pickFolder}
           updateAvailable={update.status?.updateAvailable === true}
           onUpgrade={update.upgrade}

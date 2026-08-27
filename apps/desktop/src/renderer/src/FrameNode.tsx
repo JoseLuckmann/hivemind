@@ -432,6 +432,8 @@ export function FrameNode({ id, data, selected }: { id: string; data: FrameNodeD
             ["diff", "Diff"],
             ["issues", "Issues"],
             ["browser", "Browser"],
+            ["cmdButton", "Command button"],
+            ["trigger", "Trigger"],
           ] as const).map(([kind, label]) => (
             <button
               key={kind}

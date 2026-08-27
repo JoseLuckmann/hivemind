@@ -15,7 +15,7 @@ import { subscribeStatus, type TileStatusKind } from "./agent-status-bus";
 import { AgentIcon } from "./agents";
 import { FrameRailMenu, type FrameActions } from "./FrameRailMenu";
 
-export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file";
+export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file" | "cmdButton" | "trigger";
 
 export interface LayerTile {
   id: string;
@@ -98,6 +98,8 @@ const KIND_GLYPH: Record<LayerKind, string> = {
   planReview: "▤",
   workbench: "▥",
   file: "≡",
+  cmdButton: "▶",
+  trigger: "⚡",
 };
 
 /** Workspace identity glyph, keyed to the frame color — no boxed chip (the solid
