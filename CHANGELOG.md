@@ -7,13 +7,37 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+## [1.17.0-flow.1] — 2026-08-27
+
 ### Added
 
+- **Canvas workflows — draw a chain right on the canvas.** Drop a `trigger` tile, connect it to
+  agent tiles and a `cmdButton` (command-button) tile with directional workflow edges, and fire it
+  by hand or on a schedule. The engine walks the graph and delivers each step into the (already
+  running) agent via `agent.send`/`agent.read` (Mailbox-safe, hook-driven turn completion), then
+  runs the action tile's script. New tiles: TriggerTile, CommandButtonTile, and a Handle-based
+  WorkflowEdge; see `docs/canvas-workflows.md`.
+- **File Explorer tile + tree-based File picker.** A first-class file-explorer tile and a
+  tree-based picker for opening files into editor tiles.
 - **Sync a board with Azure DevOps.** Click the gear icon on an Issues board to link it to an
   Azure DevOps project (org/project/area path + a Personal Access Token) and pull in its work
   items or push local issues out to it. The hivemind issue stays canonical; the sync engine and
   provider abstraction live in `@hivemind/core/sync` so other trackers (Jira, Google Tasks, ...)
   are a new provider file away. Manual "Sync now" for v1 — no background polling yet.
+
+### Fixed
+
+- **Claude agents no longer hang on the workspace-trust screen.** A `claude` spawned in a folder
+  it hadn't seen would block on "Do you trust the files in this folder?" and never reach its
+  prompt (sitting "working" forever). The app now pre-accepts that per-directory trust for a
+  tile's cwd (`~/.claude.json` `hasTrustDialogAccepted`) — the same consent the user gives by
+  opening the repo and spawning an agent into it.
+- **Dev profile is isolated per worktree.** Each source checkout gets its own
+  `hivemind-dev-<hash>` profile, so dev state (sessions, the detached pty-daemon, localStorage
+  layout) never leaks across worktrees or into the packaged install. Overridable via
+  `HIVEMIND_PROFILE`; legacy-profile migration is packaged-only.
+- **Geist font is self-hosted** via `@fontsource` instead of a CDN `@import` (which Vite rejected
+  when it landed after other CSS statements).
 
 ## [1.16.0-flow.1] — 2026-08-26
 
@@ -888,7 +912,8 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 - **install.sh** — single script for both fresh install and in-place upgrade. Downloads prebuilt binaries from GitHub Releases by default; `--dev` flag clones and builds from source.
 - **GitHub Actions** — `release.yml` (tag-driven build + publish on `v*.*.*`), `ci.yml` (typecheck + build + unit tests on every push / PR).
 
-[Unreleased]: https://github.com/dip497/hivemind/compare/v1.16.0-flow.1...HEAD
+[Unreleased]: https://github.com/dip497/hivemind/compare/v1.17.0-flow.1...HEAD
+[1.17.0-flow.1]: https://github.com/dip497/hivemind/releases/tag/v1.17.0-flow.1
 [1.16.0-flow.1]: https://github.com/dip497/hivemind/releases/tag/v1.16.0-flow.1
 [1.15.0]: https://github.com/dip497/hivemind/releases/tag/v1.15.0
 [1.14.3]: https://github.com/dip497/hivemind/releases/tag/v1.14.3
