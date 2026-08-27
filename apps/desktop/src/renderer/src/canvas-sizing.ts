@@ -38,13 +38,6 @@ export function defaultSizeForKind(kind: TileKind): { width: number; height: num
       return { width: 1280, height: 920 };
     case "browser":
       return { width: 1280, height: 860 };
-    case "cmdButton":
-      // A button, not a workspace tile — compact by default. Big enough for the
-      // name, the status light, and the run/stop control without crowding.
-      return { width: 300, height: 190 };
-    case "trigger":
-      // Same compact footprint as cmdButton — a small control, not a workspace.
-      return { width: 300, height: 190 };
     case "claude":
       // Compact default — the larger 15px terminal font makes a smaller tile
       // read comfortably, and a tighter box leaves more canvas free.

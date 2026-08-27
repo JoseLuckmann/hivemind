@@ -174,32 +174,6 @@ function assertOrchestrationTools(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
-    name: "hive_connect",
-    label: "Pipe hive agents",
-    description: "connect",
-    parameters: Type.Object({ srcTileId: Type.String(), dstTileId: Type.String() }),
-    async execute(toolCallId, params) {
-      void toolCallId;
-      void params.srcTileId;
-      void params.dstTileId;
-      return { content: [{ type: "text", text: "ok" }], details: {} };
-    },
-  });
-
-  pi.registerTool({
-    name: "hive_disconnect",
-    label: "Unpipe hive agents",
-    description: "disconnect",
-    parameters: Type.Object({ srcTileId: Type.String(), dstTileId: Type.Optional(Type.String()) }),
-    async execute(toolCallId, params) {
-      void toolCallId;
-      void params.srcTileId;
-      void params.dstTileId;
-      return { content: [{ type: "text", text: "ok" }], details: {} };
-    },
-  });
-
-  pi.registerTool({
     name: "hive_send_keys",
     label: "Send keys to a hive agent",
     description: "keys",
@@ -227,35 +201,6 @@ function assertOrchestrationTools(pi: ExtensionAPI): void {
       void params.decision;
       void params.reason;
       return { content: [{ type: "text", text: "ok" }], details: {} };
-    },
-  });
-
-  pi.registerTool({
-    name: "hive_workflow",
-    label: "Run hive workflow",
-    description: "workflow",
-    parameters: Type.Object({
-      shape: Type.String(),
-      items: Type.Optional(Type.Array(Type.String())),
-      prompt: Type.Optional(Type.String()),
-      stages: Type.Optional(Type.Array(Type.String())),
-      input: Type.Optional(Type.String()),
-      reduce_prompt: Type.Optional(Type.String()),
-      agent: Type.Optional(Type.String()),
-      model: Type.Optional(Type.String()),
-      frame: Type.Optional(Type.String()),
-      supervise: superviseParam,
-      max_concurrent: Type.Optional(Type.Number()),
-      timeout_ms: Type.Optional(Type.Number()),
-      close_when_done: Type.Optional(Type.Boolean()),
-    }),
-    async execute(toolCallId, params, signal) {
-      void toolCallId;
-      void params.shape;
-      void params.items;
-      void params.stages;
-      void signal;
-      return { content: [{ type: "text", text: "{}" }], details: {} };
     },
   });
 }

@@ -22,7 +22,6 @@
  *                           claude-Stop equivalent). pi writes no transcript path,
  *                           so the reply rides the event itself, read by agent.read.
  *   2. ORCHESTRATION TOOLS: spawn/read/send/report, list_frames/list_tiles, focus,
- *      close_tile, connect/disconnect, send_keys, workflow, approve — so pi's LLM can
  *      drive the canvas + other agents. Each makes a token-authenticated HCP req/res call.
  *
  * NO SUPERVISE: pi has no permission system, so a pi worker cannot be supervised and
@@ -159,7 +158,6 @@ export default function (pi) {
   // Only when the full control-plane triple is present (socket + token + tile),
   // so a pi worker can spawn/drive/supervise other agents straight over HCP.
   if (!token) return;
-  const ORCH_TIMEOUT_MS = 60 * 60 * 1000; // generous ceiling; a long workflow.run blocks main-side, not us
 
   const call = async (method, params, signal, timeoutMs) => {
     const r = await hcpRequest(method, params, signal, timeoutMs || ORCH_TIMEOUT_MS);
@@ -295,30 +293,6 @@ export default function (pi) {
   });
 
   pi.registerTool({
-    name: "hive_connect",
-    label: "Pipe hive agents",
-    description:
-      "Pipe one agent's output into another's input: whenever the source agent (srcTileId) finishes a turn, its reply is automatically sent to the destination agent (dstTileId). Chains workers without you relaying by hand. Requires the hivemind desktop app.",
-    parameters: Type.Object({ srcTileId: Type.String(), dstTileId: Type.String() }),
-    async execute(toolCallId, params, signal) {
-      return call("tile.connect", { srcTileId: params.srcTileId, dstTileId: params.dstTileId }, signal);
-    },
-  });
-
-  pi.registerTool({
-    name: "hive_disconnect",
-    label: "Unpipe hive agents",
-    description:
-      "Remove a pipe created with hive_connect. Omit dstTileId to remove ALL pipes out of srcTileId. Requires the hivemind desktop app.",
-    parameters: Type.Object({ srcTileId: Type.String(), dstTileId: Type.Optional(Type.String()) }),
-    async execute(toolCallId, params, signal) {
-      const p = { srcTileId: params.srcTileId };
-      if (typeof params.dstTileId === "string") p.dstTileId = params.dstTileId;
-      return call("tile.disconnect", p, signal);
-    },
-  });
-
-  pi.registerTool({
     name: "hive_send_keys",
     label: "Send keys to a hive agent",
     description:
@@ -343,38 +317,6 @@ export default function (pi) {
       const p = { reqId: params.reqId, decision: params.decision };
       if (typeof params.reason === "string") p.reason = params.reason;
       return call("agent.approve", p, signal);
-    },
-  });
-
-  pi.registerTool({
-    name: "hive_workflow",
-    label: "Run hive workflow",
-    description:
-      "Run a MULTI-AGENT WORKFLOW: spawn a fleet of worker agents as visible tiles, drive them, and BLOCK until done — then return their replies aggregated. shape: 'fanout' (one worker per items[i], \`prompt\` is a template with {item}); 'mapreduce' (fanout then one reducer fed all outputs via \`reduce_prompt\` with {results}); 'pipeline' (sequential \`stages\`, each may use {input} for the prior stage's reply). Each worker result carries a status ('turn'|'timeout'|'error'). Requires the hivemind desktop app.",
-    parameters: Type.Object({
-      shape: Type.String({ description: "fanout | pipeline | mapreduce." }),
-      items: Type.Optional(Type.Array(Type.String(), { description: "fanout/mapreduce: one worker per element, substituted into {item}." })),
-      prompt: Type.Optional(Type.String({ description: "fanout/mapreduce: the per-worker task. Use {item}." })),
-      stages: Type.Optional(Type.Array(Type.String(), { description: "pipeline: one prompt per stage. Each may use {input}." })),
-      input: Type.Optional(Type.String({ description: "pipeline: optional seed for the first stage's {input}." })),
-      reduce_prompt: Type.Optional(Type.String({ description: "mapreduce: the reducer prompt. Use {results}." })),
-      agent: Type.Optional(Type.String({ description: "Runtime for every worker: 'claude' (default), 'codex', 'droid', 'pi', …" })),
-      model: Type.Optional(Type.String({ description: "claude only — model alias applied to every worker." })),
-      frame: Type.Optional(Type.String({ description: "Frame to spawn workers into. Omit to use your own frame." })),
-      supervise: superviseParam,
-      max_concurrent: Type.Optional(Type.Number({ description: "Max workers live at once (default 6, capped 12)." })),
-      timeout_ms: Type.Optional(Type.Number({ description: "Per-worker turn ceiling in ms (default 600000)." })),
-      close_when_done: Type.Optional(Type.Boolean({ description: "Close each worker tile after collecting its reply (default false)." })),
-    }),
-    async execute(toolCallId, params, signal) {
-      return call("workflow.run", {
-        shape: params.shape, items: params.items, prompt: params.prompt,
-        stages: params.stages, input: params.input, reduce_prompt: params.reduce_prompt,
-        agent: params.agent, model: params.model, frame: params.frame,
-        supervise: params.supervise, max_concurrent: params.max_concurrent,
-        timeout_ms: params.timeout_ms, close_when_done: params.close_when_done,
-        callerTile: tile,
-      }, signal);
     },
   });
 }
