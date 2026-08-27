@@ -20,11 +20,19 @@ import {
   unlinkIssues,
   updateIssue,
   writeAgentContext,
+  readConfig,
   writeConfig,
   templates,
+  sync,
   type IssueState,
   type LinkType,
 } from "@hivemind/core";
+import {
+  getSyncSecret,
+  setSyncSecret,
+  hasSyncSecret,
+  clearSyncSecret,
+} from "./sync/secret-store.js";
 import os from "node:os";
 import type { IssuePatch } from "@hivemind/core/types";
 import * as ptyHost from "./pty-host.js";
@@ -766,7 +774,7 @@ ipcMain.handle(
     const existing = await findRoot(dir);
     if (existing === root) throw new Error(`.hivemind/ already exists at ${root}`);
     await fsp.mkdir(path.join(root, "issues"), { recursive: true });
-    await writeConfig(root, { prefix, next_id: 1, agents: {} });
+    await writeConfig(root, { prefix, next_id: 1, agents: {}, sync: null });
     await writeAgentContext(root);
     // Install the agentic stack by default — a brand-new workspace should be
     // agent-ready so "Work on this" actually works (claude gets the hive MCP +
@@ -939,6 +947,98 @@ ipcMain.handle("deleteIssue", wrap(async (_e, root: string, id: string) => {
   await deleteIssueCore(root, id);
   await writeAgentContext(root);
 }));
+
+// ── external-tracker sync ────────────────────────────────
+ipcMain.handle(
+  "getSyncConfig",
+  wrap(async (_e, root: string) => {
+    const cfg = await readConfig(root);
+    if (!cfg.sync) return null;
+    const providerId = cfg.sync.providerId;
+    // lastSyncedAt isn't stored on the config — it's the newest `syncedAt`
+    // across this board's issues' links to this provider.
+    const summaries = await listIssues(root);
+    let lastSyncedAt: string | null = null;
+    for (const s of summaries) {
+      const syncedAt = s.sync?.find((l) => l.provider === providerId)?.syncedAt;
+      if (syncedAt && (!lastSyncedAt || syncedAt > lastSyncedAt)) lastSyncedAt = syncedAt;
+    }
+    return {
+      providerId,
+      settings: cfg.sync.settings,
+      hasSecret: hasSyncSecret(root, providerId),
+      lastSyncedAt,
+    };
+  })
+);
+ipcMain.handle(
+  "setSyncConfig",
+  wrap(
+    async (
+      _e,
+      root: string,
+      providerId: string,
+      settings: Record<string, unknown>,
+      secret?: string,
+    ) => {
+      const provider = sync.syncProviderFor(providerId);
+      if (!provider) throw new Error(`unknown sync provider: ${providerId}`);
+      provider.parseConfig(settings); // throws if invalid — validate before saving
+      const cfg = await readConfig(root);
+      await writeConfig(root, { ...cfg, sync: { providerId, settings } });
+      if (secret !== undefined) {
+        if (secret === "") clearSyncSecret(root, providerId);
+        else setSyncSecret(root, providerId, secret);
+      }
+    },
+  )
+);
+ipcMain.handle(
+  "testSyncConnection",
+  wrap(
+    async (
+      _e,
+      root: string,
+      providerId: string,
+      settings: Record<string, unknown>,
+      secret?: string,
+    ) => {
+      const provider = sync.syncProviderFor(providerId);
+      if (!provider) return { ok: false, error: `unknown sync provider: ${providerId}` };
+      try {
+        const config = provider.parseConfig(settings);
+        const resolvedSecret = secret || getSyncSecret(root, providerId);
+        if (!resolvedSecret) return { ok: false, error: "no credential saved yet" };
+        return await provider.testConnection(config, resolvedSecret);
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+  )
+);
+ipcMain.handle(
+  "clearSyncConfig",
+  wrap(async (_e, root: string) => {
+    const cfg = await readConfig(root);
+    if (cfg.sync) clearSyncSecret(root, cfg.sync.providerId);
+    await writeConfig(root, { ...cfg, sync: null });
+  })
+);
+ipcMain.handle(
+  "runSync",
+  wrap(async (_e, root: string) => {
+    const cfg = await readConfig(root);
+    if (!cfg.sync) throw new Error("this board isn't linked to a tracker");
+    const provider = sync.syncProviderFor(cfg.sync.providerId);
+    if (!provider) throw new Error(`unknown sync provider: ${cfg.sync.providerId}`);
+    const secret = getSyncSecret(root, cfg.sync.providerId);
+    if (!secret) throw new Error("no credential saved for this tracker");
+    const config = provider.parseConfig(cfg.sync.settings);
+    const report = await sync.runSync(root, provider, config, secret);
+    await writeAgentContext(root);
+    return report;
+  })
+);
 
 // git
 ipcMain.handle("gitStatus", wrap((_e, repoPath: string) => gitStatus(repoPath)));

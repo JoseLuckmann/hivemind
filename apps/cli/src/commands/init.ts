@@ -76,7 +76,7 @@ export const initCmd = defineCommand({
 
     try {
       await fs.mkdir(path.join(root, "issues"), { recursive: true });
-      await writeConfig(root, { prefix, next_id: 1, agents: {} });
+      await writeConfig(root, { prefix, next_id: 1, agents: {}, sync: null });
       await writeAgentContext(root);
       // Index this workspace so cross-repo move/link can resolve its prefix.
       await registerWorkspace(root).catch(() => {});

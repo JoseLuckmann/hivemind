@@ -9,8 +9,11 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ### Added
 
-- **Command Button tile** — a canvas button that runs a saved bash script in the background (no terminal), with glanceable lifecycle state (idle · running · done · error) shown as a status light + Run/Stop control. Create one from the top-center tool island (key `8`) or a frame's Open menu; name it, write a script, and optionally set a working directory. The command + cwd persist with the layout (per-repo); the run state is tracked in the main process and streamed live so it survives a window reload. Useful for one-click workflows like `make deploy stage=dev target=agentx-service` scoped to a workspace frame.
-- **Canvas workflows** — turn the canvas into a visual, user-drawn agent pipeline. Drop a **Trigger** tile (key `9`, manual or on a schedule), drag a connection to an agent tile to give it a prompt, chain further agent tiles (optionally priming each with the previous one's reply), and end at a Command Button to run a script. Firing the trigger walks the chain, deterministically waiting for each agent's turn to finish (hook-driven, not screen-scraped) before advancing. See `docs/canvas-workflows.md`.
+- **Sync a board with Azure DevOps.** Click the gear icon on an Issues board to link it to an
+  Azure DevOps project (org/project/area path + a Personal Access Token) and pull in its work
+  items or push local issues out to it. The hivemind issue stays canonical; the sync engine and
+  provider abstraction live in `@hivemind/core/sync` so other trackers (Jira, Google Tasks, ...)
+  are a new provider file away. Manual "Sync now" for v1 — no background polling yet.
 
 ## [1.16.0-flow.1] — 2026-08-26
 

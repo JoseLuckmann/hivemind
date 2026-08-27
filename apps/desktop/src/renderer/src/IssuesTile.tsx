@@ -9,11 +9,11 @@
  * work prompt. Per-tile view + group-by persist in localStorage.
  */
 import { useMemo, useState } from "react";
-import { GripVertical, Inbox, FolderGit2 } from "lucide-react";
+import { GripVertical, Inbox, FolderGit2, Settings } from "lucide-react";
 import { HeaderPinButton, type PinRect } from "./canvas-nodes";
 import { useTileFont, FontStepper, handleFontKey } from "./tile-font";
 import type { IssueSummary } from "@hivemind/core/types";
-import { useIssues } from "./queries";
+import { useIssues, useSyncConfig } from "./queries";
 import { FilterBar, emptyFilters, applyFilters, type Filters } from "./components/FilterBar";
 import { ViewSwitcher, type ViewKind } from "./components/ViewSwitcher";
 import { BoardView } from "./issues/BoardView";
@@ -94,6 +94,7 @@ const readLS = <T extends string>(k: string, fallback: T): T => {
 export function IssuesTile({ root, onClose, selected = false, pinned, onTogglePin }: Props) {
   const font = useTileFont(`issues:${root ?? "none"}`, 13);
   const { data: issues = [], isLoading } = useIssues(root);
+  const { data: syncConfig } = useSyncConfig(root);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [view, setView] = useState<ViewKind>(() => (root ? readLS<ViewKind>(viewKey(root), "board") : "board"));
   const [groupBy, setGroupBy] = useState<GroupBy>(() => (root ? readLS<GroupBy>(groupKey(root), "state") : "state"));
@@ -163,6 +164,19 @@ export function IssuesTile({ root, onClose, selected = false, pinned, onTogglePi
               <>
                 <GroupByMenu value={groupBy} onChange={setGroupP} />
                 <ViewSwitcher value={view} onChange={setViewP} views={["board", "list"]} />
+                <button
+                  onClick={() =>
+                    root && window.dispatchEvent(new CustomEvent("hivemind:sync-settings", { detail: { root } }))
+                  }
+                  className="nodrag relative size-7 grid place-items-center rounded-lg text-[var(--color-fg3)] hover:bg-[var(--color-line2)] hover:text-[var(--color-fg)] cursor-pointer"
+                  aria-label="sync settings"
+                  title={syncConfig ? `Synced with ${syncConfig.providerId}` : "Sync this board with a tracker"}
+                >
+                  <Settings size={14} />
+                  {syncConfig && (
+                    <span className="absolute top-1 right-1 size-1.5 rounded-full bg-[var(--color-brand)]" />
+                  )}
+                </button>
                 <button
                   onClick={() => window.dispatchEvent(new CustomEvent("hivemind:new-issue"))}
                   className="nodrag inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11.5px] font-semibold text-white bg-[var(--color-brand)] hover:opacity-90 cursor-pointer hm-soft"

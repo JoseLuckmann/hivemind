@@ -49,6 +49,7 @@ import { useStateWithRef } from "./use-state-with-ref";
 import { defaultTileSize, defaultSizeForKind, FRAME_PAD, FRAME_HEADER } from "./canvas-sizing";
 import { useWorktrees } from "./useWorktrees";
 import { RemoteConnectModal } from "./components/RemoteConnectModal";
+import { SyncSettingsModal } from "./components/SyncSettingsModal";
 import { CommandButtonModal, type CmdButtonConfig } from "./components/CommandButtonModal";
 import { TriggerConfigModal, type TriggerConfig } from "./components/TriggerConfigModal";
 import { runWorkflow, type TriggerRunState } from "./workflow-engine";
@@ -966,6 +967,23 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     };
     window.addEventListener("hivemind:attach-remote", onAttach as EventListener);
     return () => window.removeEventListener("hivemind:attach-remote", onAttach as EventListener);
+  }, []);
+
+  // External-tracker sync settings — opened from an IssuesTile's gear button,
+  // which fires `hivemind:sync-settings` with its OWN root (a board's sync
+  // config is per-workspace, and a frame can host an IssuesTile bound to a
+  // different repo than the canvas's base root — see IssueCard's
+  // `hivemind:open-issue` for the same explicit-root pattern). Rendered here,
+  // outside react-flow's transformed viewport, so `position: fixed` overlays
+  // the real screen instead of resolving against the canvas transform.
+  const [syncSettingsRoot, setSyncSettingsRoot] = useState<string | null>(null);
+  useEffect(() => {
+    const onSyncSettings = (e: Event) => {
+      const root = (e as CustomEvent<{ root: string }>).detail?.root;
+      if (root) setSyncSettingsRoot(root);
+    };
+    window.addEventListener("hivemind:sync-settings", onSyncSettings as EventListener);
+    return () => window.removeEventListener("hivemind:sync-settings", onSyncSettings as EventListener);
   }, []);
 
   // Git commit/sync modal — open for a specific repo (a frame's worktree /
@@ -2158,6 +2176,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
           onClose={() => setRemoteAttach(null)}
           onPick={(uri) => { if (remoteAttach) bindRemote(remoteAttach, uri); setRemoteAttach(null); }}
         />
+        <SyncSettingsModal root={syncSettingsRoot} onClose={() => setSyncSettingsRoot(null)} />
         <ThemeCustomizer open={customizerOpen} onClose={() => setCustomizerOpen(false)} />
         {cmdModal && (() => {
           const inst = tiles.find((t) => t.id === cmdModal.tileId);
