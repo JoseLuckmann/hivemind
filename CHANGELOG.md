@@ -7,6 +7,8 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+## [1.17.0-flow.2] — 2026-08-27
+
 ### Added
 
 - **Issues board: aggregate "my tasks" across Azure boards + types.** The Azure DevOps sync now
@@ -951,7 +953,8 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 - **install.sh** — single script for both fresh install and in-place upgrade. Downloads prebuilt binaries from GitHub Releases by default; `--dev` flag clones and builds from source.
 - **GitHub Actions** — `release.yml` (tag-driven build + publish on `v*.*.*`), `ci.yml` (typecheck + build + unit tests on every push / PR).
 
-[Unreleased]: https://github.com/dip497/hivemind/compare/v1.17.0-flow.1...HEAD
+[Unreleased]: https://github.com/dip497/hivemind/compare/v1.17.0-flow.2...HEAD
+[1.17.0-flow.2]: https://github.com/dip497/hivemind/releases/tag/v1.17.0-flow.2
 [1.17.0-flow.1]: https://github.com/dip497/hivemind/releases/tag/v1.17.0-flow.1
 [1.16.0-flow.1]: https://github.com/dip497/hivemind/releases/tag/v1.16.0-flow.1
 [1.15.0]: https://github.com/dip497/hivemind/releases/tag/v1.15.0
