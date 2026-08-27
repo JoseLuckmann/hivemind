@@ -149,11 +149,19 @@ export function IssuesTile({ root, onClose, selected = false, pinned, onTogglePi
     if (repoDir) {
       try { await window.hive.installAgentic(repoDir); } catch { /* best-effort */ }
     }
-    const agent = issue.assignee?.type === "agent" ? issue.assignee.id : undefined;
-    const model = issue.assignee?.type === "agent" ? issue.assignee.model : undefined;
+    // Open the Work modal (agent + frame + extra prompt), prefilled from the
+    // issue's preferences. Canvas hosts the modal + resolves the frame.
     window.dispatchEvent(
-      new CustomEvent("hivemind:work-on-issue", {
-        detail: { root, id: issue.id, title: issue.title, agent, model },
+      new CustomEvent("hivemind:open-work-modal", {
+        detail: {
+          root,
+          id: issue.id,
+          title: issue.title,
+          preferredFrame: issue.preferredFrame,
+          preferredAgent:
+            issue.preferredAgent ??
+            (issue.assignee?.type === "agent" ? issue.assignee.id : undefined),
+        },
       }),
     );
   };

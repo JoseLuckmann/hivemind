@@ -12,8 +12,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { useCreateIssue, useIssues, useWorkspaces, useSyncConfig } from "../queries";
-import type { Assignee, IssueState } from "@hivemind/core/types";
+import { useCreateIssue, useIssues, useWorkspaces, useSyncConfig, useSyncAreas } from "../queries";
+import type { Assignee, IssueState, IssueType } from "@hivemind/core/types";
+import { ISSUE_TYPE_RANK } from "@hivemind/core/types";
 import { AssigneePicker, LabelPicker, ParentPicker } from "../issues/pickers";
 
 interface Props {
@@ -30,6 +31,18 @@ const STATES: { value: IssueState; label: string }[] = [
   { value: "in_progress", label: "In progress" },
   { value: "in_review", label: "In review" },
   { value: "done", label: "Done" },
+];
+
+/** Canonical hive issue types, coarse→fine. Drives the Type picker + (via the
+ *  hierarchy rank) which parents a new issue may pick. */
+const ISSUE_TYPES: { value: IssueType; label: string }[] = [
+  { value: "epic", label: "Epic" },
+  { value: "feature", label: "Feature" },
+  { value: "story", label: "Story" },
+  { value: "bug", label: "Bug" },
+  { value: "support", label: "Apoio" },
+  { value: "spike", label: "Spike" },
+  { value: "task", label: "Task" },
 ];
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -83,35 +96,42 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
 
   const [title, setTitle] = useState("");
   const [state, setState] = useState<IssueState>("todo");
+  const [issueType, setIssueType] = useState<IssueType>("task");
   const [description, setDescription] = useState("");
   const [labels, setLabels] = useState<string[]>([]);
   const [assignee, setAssignee] = useState<Assignee | null>(null);
   const [parent, setParent] = useState<string | null>(null);
 
+  // Parent candidates respect the type hierarchy: a new issue may only parent
+  // to an issue of a STRICTLY higher level (a Story→Feature, a Feature→Epic).
+  // Untyped issues are always allowed as parents (legacy issues with no type).
+  const parentCandidates = useMemo(
+    () =>
+      allIssues.filter((i) => {
+        if (!i.type) return true;
+        return ISSUE_TYPE_RANK[i.type] < ISSUE_TYPE_RANK[issueType];
+      }),
+    [allIssues, issueType],
+  );
+
   // Tracker (Azure) config for the selected workspace — powers the Area (board)
   // + Type pickers so a new issue can be filed onto a specific board/type.
   const { data: syncConfig } = useSyncConfig(selectedRoot);
+  const { data: syncAreas } = useSyncAreas(syncConfig ? selectedRoot : null);
   const syncProviderId = syncConfig?.providerId ?? null;
-  const workItemTypes = useMemo<string[]>(() => {
-    const s = syncConfig?.settings;
-    if (Array.isArray(s?.workItemTypes)) return (s!.workItemTypes as unknown[]).filter((t): t is string => typeof t === "string");
-    if (typeof s?.workItemType === "string") return [s.workItemType];
-    return [];
-  }, [syncConfig]);
   const defaultArea = typeof syncConfig?.settings?.areaPath === "string" ? syncConfig.settings.areaPath : "";
-  const [workItemType, setWorkItemType] = useState<string>("");
   const [areaPath, setAreaPath] = useState<string>("");
 
-  // Re-seed the tracker fields whenever the target board / its config changes.
+  // Re-seed the area whenever the target board / its config changes.
   useEffect(() => {
-    setWorkItemType(workItemTypes[0] ?? "");
     setAreaPath(defaultArea);
-  }, [workItemTypes, defaultArea, selectedRoot]);
+  }, [defaultArea, selectedRoot]);
 
   useEffect(() => {
     if (open) {
       setTitle("");
       setState("todo");
+      setIssueType("task");
       setDescription("");
       setLabels([]);
       setAssignee(null);
@@ -132,16 +152,18 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
         opts: {
           title: title.trim(),
           state,
+          type: issueType,
           description: description.trim() || undefined,
           labels: labels.length ? labels : undefined,
           assignee: assignee ?? undefined,
           parent: parent ?? undefined,
           // Only send a tracker hint when this board is synced — otherwise the
-          // issue is local-only and needs no provider/type/area.
+          // issue is local-only and needs no provider/area. The Azure work item
+          // type is derived from the canonical hive `type` on push (see the
+          // provider's azureTypeForIssue), so no work-item-type hint is needed.
           sync: syncProviderId
             ? {
                 provider: syncProviderId,
-                workItemType: workItemType.trim() || undefined,
                 areaPath: areaPath.trim() || undefined,
               }
             : undefined,
@@ -209,41 +231,52 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
                   ))}
                 </select>
               </Field>
+              <Field label="Type">
+                <select
+                  value={issueType}
+                  onChange={(e) => setIssueType(e.target.value as IssueType)}
+                  className={inputCls}
+                  aria-label="Issue type"
+                >
+                  {ISSUE_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
               <Field label="Assignee">
                 <PickerBox>
                   <AssigneePicker value={assignee} allAssignees={allAssignees} onChange={setAssignee} />
                 </PickerBox>
               </Field>
+              <Field label="Parent">
+                <PickerBox>
+                  <ParentPicker value={parent} candidates={parentCandidates} onChange={setParent} />
+                </PickerBox>
+              </Field>
             </div>
 
-            {/* Tracker board + type — only when the workspace is synced to an
-                external tracker (Azure). Area = which board; Type = the Azure
-                work item type the item is created as. */}
+            {/* Tracker board (Area) — only when the workspace is synced. The hive
+                Type above maps to the Azure work item type automatically, so no
+                separate work-item-type picker is needed here. Area is a dropdown
+                sourced from the tracker when available, else a free-text field. */}
             {syncProviderId && (
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Type">
-                  {workItemTypes.length > 0 ? (
-                    <select
-                      value={workItemType}
-                      onChange={(e) => setWorkItemType(e.target.value)}
-                      className={inputCls}
-                      aria-label="Work item type"
-                    >
-                      {workItemTypes.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      value={workItemType}
-                      onChange={(e) => setWorkItemType(e.target.value)}
-                      placeholder="Task"
-                      className={inputCls}
-                      aria-label="Work item type"
-                    />
-                  )}
-                </Field>
-                <Field label="Area (board)">
+              <Field label="Area (board)">
+                {syncAreas && syncAreas.areas.length > 0 ? (
+                  <select
+                    value={areaPath}
+                    onChange={(e) => setAreaPath(e.target.value)}
+                    className={inputCls}
+                    aria-label="Area path"
+                  >
+                    <option value="">{defaultArea || "(project default)"}</option>
+                    {syncAreas.areas.map((a) => (
+                      <option key={a.path} value={a.path}>{a.path}</option>
+                    ))}
+                  </select>
+                ) : (
                   <input
                     value={areaPath}
                     onChange={(e) => setAreaPath(e.target.value)}
@@ -251,22 +284,15 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
                     className={inputCls}
                     aria-label="Area path"
                   />
-                </Field>
-              </div>
+                )}
+              </Field>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Labels">
-                <PickerBox>
-                  <LabelPicker value={labels} allLabels={allLabels} onChange={setLabels} />
-                </PickerBox>
-              </Field>
-              <Field label="Parent">
-                <PickerBox>
-                  <ParentPicker value={parent} candidates={allIssues} onChange={setParent} />
-                </PickerBox>
-              </Field>
-            </div>
+            <Field label="Labels">
+              <PickerBox>
+                <LabelPicker value={labels} allLabels={allLabels} onChange={setLabels} />
+              </PickerBox>
+            </Field>
 
             <Field label="Description">
               <textarea

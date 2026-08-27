@@ -12,7 +12,7 @@ import { identifyAgent, detectTileStatus, stabilizeClaudeStatus, normalizeAgentT
 import { registerClaude, unregisterClaude, shouldDeliver, peekWork, claimWork, clearWork, type SendToClaudeDetail } from "./claude-bus";
 import { publishStatus, clearStatus, noteOutput, revalidate, type TileStatusKind } from "./agent-status-bus";
 import { SUBMIT_DELAY_MS, SPAWN_SUBMIT_RETRY_MS, deliversPromptViaArgv } from "../../shared/agent-io";
-import { Pencil, GripVertical } from "lucide-react";
+import { Pencil, GripVertical, Link2 } from "lucide-react";
 import { webUrlForInternalBrowser } from "./browser-open";
 import { useTheme, getTheme } from "./theme-store";
 import { FullscreenShell, useReparentFullscreen } from "./tile-fullscreen";
@@ -140,9 +140,12 @@ interface Props {
    *  this tile's header next to close — no floating chip. */
   pinned?: boolean;
   onTogglePin?: (id: string, rect: PinRect) => void;
+  /** The hivemind issue this agent is linked to, if any — rendered as a header
+   *  chip; clicking the link button opens the issue picker (Canvas owns it). */
+  issueId?: string;
 }
 
-export function TerminalTile({ tileId, cwd, cmd, args, label, name, onRename, onAgentTitle, onOpenInBrowser, onOpenInEditor, onClose, selected, pinned, onTogglePin }: Props) {
+export function TerminalTile({ tileId, cwd, cmd, args, label, name, onRename, onAgentTitle, onOpenInBrowser, onOpenInEditor, onClose, selected, pinned, onTogglePin, issueId }: Props) {
   // Editable header name: starts in display mode; double-click opens input.
   // Persists via onRename → Canvas tileNames → LAYOUT_KEY localStorage.
   const [editing, setEditing] = useState(false);
@@ -1105,10 +1108,42 @@ export function TerminalTile({ tileId, cwd, cmd, args, label, name, onRename, on
             </>
           );
         })()}
+        {/* Link-to-task — associate this running agent with a hivemind issue.
+            Always visible (not hover-gated) so the link status is legible at a
+            glance. Linked → a clickable chip showing the issue id; clicking
+            opens the picker to change/unlink. Unlinked → a quiet link icon. */}
+        {issueId ? (
+          <button
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent("hivemind:open-tile-issue-linker", { detail: { tileId } }),
+              )
+            }
+            className="nodrag ml-auto inline-flex items-center gap-1 h-5 px-1.5 rounded bg-[var(--color-brand)]/15 text-[var(--color-brand)] text-[10px] font-mono font-semibold hover:bg-[var(--color-brand)]/25 transition-colors cursor-pointer shrink-0"
+            title={`Working on ${issueId} — click to change or unlink`}
+            aria-label={`Linked to task ${issueId}`}
+          >
+            <Link2 size={10} aria-hidden />
+            {issueId}
+          </button>
+        ) : (
+          <button
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent("hivemind:open-tile-issue-linker", { detail: { tileId } }),
+              )
+            }
+            className="nodrag ml-auto size-5 grid place-items-center rounded text-[var(--color-fg3)] hover:bg-[var(--color-line2)] hover:text-[var(--color-fg)] transition-colors cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            title="Link this agent to a task"
+            aria-label="Link this agent to a task"
+          >
+            <Link2 size={11} aria-hidden />
+          </button>
+        )}
         {/* Font / scale / fullscreen controls — revealed only on header hover
             (group-hover). Two SEPARATE controls: font size (A−/A+, density only)
             and whole-tile scale (−/+, grows the node box + font in proportion). */}
-        <span className="ml-auto flex items-center gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
+        <span className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
           {/* Font size only (A−/A+) */}
           <span className="nodrag inline-flex items-center rounded bg-[var(--color-bg)] border border-[var(--color-line2)] overflow-hidden" title="Font size (Ctrl/Cmd ±)">
             <button

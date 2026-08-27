@@ -9,13 +9,14 @@
  * tile's status here stays in sync with everywhere else. Pure presentational +
  * its own status subscription; Canvas owns the data + focus actions.
  */
-import { useEffect, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
-import { Layers, ChevronRight, ChevronDown, GitBranch, Server, Folder, FolderOpen, PanelLeftClose, Globe } from "lucide-react";
+import { useEffect, useState, type ReactNode, type PointerEvent as ReactPointerEvent, type DragEvent as ReactDragEvent } from "react";
+import { Layers, ChevronRight, ChevronDown, GitBranch, Server, Folder, FolderOpen, PanelLeftClose, Globe, GripVertical } from "lucide-react";
 import { subscribeStatus, type TileStatusKind } from "./agent-status-bus";
 import { AgentIcon } from "./agents";
 import { FrameRailMenu, type FrameActions } from "./FrameRailMenu";
+import { LOOSE_BUCKET, reorder } from "./layers-order";
 
-export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file" | "explorer" | "cmdButton" | "trigger";
+export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file" | "explorer";
 
 export interface LayerTile {
   id: string;
@@ -51,6 +52,14 @@ interface Props {
    *  arrange, rename/color/delete). Optional so the panel still renders without
    *  a host that wires these (e.g. tests). */
   frameActions?: FrameActions;
+  /** Manual drag-to-reorder. Optional so the panel still renders read-only
+   *  without a host that persists the order (e.g. tests / WindowsView rail).
+   *  `onReorderTiles` fires with the NEW full id sequence for one bucket
+   *  (a frame id, or LOOSE_BUCKET for the loose "Canvas" group); reordering is
+   *  scoped to within a single bucket. `onReorderFrames` fires with the new
+   *  top-level frame sequence. */
+  onReorderTiles?: (bucket: string, orderedIds: string[]) => void;
+  onReorderFrames?: (orderedIds: string[]) => void;
 }
 
 const STATUS_COLOR: Record<TileStatusKind, string> = {
@@ -98,8 +107,6 @@ const KIND_GLYPH: Record<LayerKind, string> = {
   planReview: "▤",
   workbench: "▥",
   file: "≡",
-  cmdButton: "▶",
-  trigger: "⚡",
   // Rendered via the Folder lucide icon below (same reasoning as browser).
   explorer: "",
 };
@@ -144,7 +151,7 @@ function WorkspaceIcon({ color, remote, worktree, collapsed }: { color: string; 
   );
 }
 
-export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocusFrame, frameActions }: Props) {
+export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocusFrame, frameActions, onReorderTiles, onReorderFrames }: Props) {
   // Persisted: panel hidden + which frame groups are collapsed. Now that the
   // panel is DOCKED (a flex sibling, not an overlay) it no longer occludes any
   // tile, so it defaults to SHOWN; collapsing leaves a narrow icon rail. The
@@ -185,6 +192,39 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
   // Inline frame rename — active frame id + its draft. Started from the context
   // menu ("Rename") or a double-click on the frame title; commits on Enter/blur.
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null);
+
+  // Drag-to-reorder state. `drag` is what's being dragged (a tile within a
+  // bucket, or a top-level frame); `dropTarget` marks the row a drop-before
+  // indicator is drawn on. Kept minimal — the actual new sequence is computed
+  // from the live arrays at drop time via the pure `reorder` helper, so this
+  // state only drives the visual affordance. Reorder is enabled only when the
+  // matching callback is wired (read-only otherwise).
+  const canDragTiles = !!onReorderTiles;
+  const canDragFrames = !!onReorderFrames;
+  const [drag, setDrag] = useState<
+    | { type: "tile"; id: string; bucket: string }
+    | { type: "frame"; id: string }
+    | null
+  >(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const endDrag = () => { setDrag(null); setDropTarget(null); };
+
+  // Drop `drag` before `beforeId` in its bucket (or append when beforeId is
+  // null). Recomputes the bucket's live id order, applies the pure move, and
+  // fires the host callback. Cross-bucket / cross-type drops are ignored — a
+  // tile only reorders among its siblings, a frame only among top-level frames.
+  const dropTileBefore = (bucket: string, beforeId: string | null) => {
+    if (drag?.type !== "tile" || drag.bucket !== bucket) return endDrag();
+    const liveIds = (bucket === LOOSE_BUCKET ? looseTiles : tilesOf(bucket)).map((t) => t.id);
+    onReorderTiles?.(bucket, reorder(liveIds, drag.id, beforeId));
+    endDrag();
+  };
+  const dropFrameBefore = (beforeId: string | null) => {
+    if (drag?.type !== "frame") return endDrag();
+    const liveIds = topFrames.map((f) => f.id);
+    onReorderFrames?.(reorder(liveIds, drag.id, beforeId));
+    endDrag();
+  };
 
   // Live status per tile, from the shared bus (same source as frame chips).
   const [status, setStatus] = useState<Map<string, TileStatusKind>>(new Map());
@@ -268,26 +308,62 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
     return best;
   };
 
-  const renderTile = (t: LayerTile, depth: number): ReactNode => {
+  const renderTile = (t: LayerTile, depth: number, bucket: string): ReactNode => {
     // A plan-review tile is inherently a "needs you" state (an agent is blocked
     // on your review) — surface it as warn + pulse with a "review" tag.
     const isPlan = t.kind === "planReview";
     const st: TileStatusKind = isPlan ? "question" : (status.get(t.id) ?? "idle");
     const sel = t.id === selectedTileId;
+    // Drop indicator: a hairline above this row while a same-bucket tile hovers
+    // over it. Only the drop TARGET row draws it; dragging its own row shows the
+    // moved-item affordance (dimmed) instead.
+    const isDropTarget = drag?.type === "tile" && drag.bucket === bucket && dropTarget === t.id && drag.id !== t.id;
+    const isDragging = drag?.type === "tile" && drag.id === t.id;
     return (
       <button
         key={t.id}
         onClick={() => onFocusTile(t.id)}
         data-active={sel}
+        draggable={canDragTiles}
+        onDragStart={canDragTiles ? (e: ReactDragEvent) => {
+          setDrag({ type: "tile", id: t.id, bucket });
+          e.dataTransfer.effectAllowed = "move";
+          // A payload is required for Firefox to start a DnD at all.
+          e.dataTransfer.setData("text/plain", t.id);
+        } : undefined}
+        onDragOver={canDragTiles ? (e: ReactDragEvent) => {
+          // Only accept a tile from the SAME bucket — cross-frame moves are a
+          // canvas action, not a reorder. preventDefault marks a valid target.
+          if (drag?.type !== "tile" || drag.bucket !== bucket) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          if (dropTarget !== t.id) setDropTarget(t.id);
+        } : undefined}
+        onDrop={canDragTiles ? (e: ReactDragEvent) => {
+          e.preventDefault();
+          // Bottom-half drop lands AFTER this row (before its next sibling, or
+          // appended when it's the last) — the natural gesture for "put it below
+          // this one". Top-half lands before it.
+          const rect = e.currentTarget.getBoundingClientRect();
+          const after = e.clientY - rect.top > rect.height / 2;
+          const siblingIds = (bucket === LOOSE_BUCKET ? looseTiles : tilesOf(bucket)).map((x) => x.id);
+          const idx = siblingIds.indexOf(t.id);
+          const beforeId = after ? (siblingIds[idx + 1] ?? null) : t.id;
+          dropTileBefore(bucket, beforeId);
+        } : undefined}
+        onDragEnd={canDragTiles ? endDrag : undefined}
         style={{
           paddingLeft: 12 + depth * 14,
+          // Drop-before indicator: a brand hairline riding the row's top edge.
+          ...(isDropTarget ? { boxShadow: "inset 0 2px 0 0 var(--color-brand)" } : {}),
+          opacity: isDragging ? 0.4 : undefined,
           // Selected surface set INLINE (staleness-proof, glass never remaps it):
           // `--surface-4` is the opaque neutral "active" surface — the SOLE
           // selection cue. No brand accent bar: the inset lavender-blue boxShadow
           // read as an unwanted blue block on the row's left edge. A row is
           // SELECTED, not "focused" — `outline-none` (an already-compiled utility
           // the whole app uses) suppresses the global focus ring.
-          ...(sel
+          ...(sel && !isDropTarget
             ? {
                 background: "var(--surface-4)",
                 // Neutral (NOT brand) hairline ring so the active row reads as a
@@ -356,13 +432,56 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
     const kids = childFramesOf(gid);
     const isWt = !!frame.parentFrameId;
     const agg = frameAgg(gid);
+    // Only top-level (repo) frames reorder — worktree sub-frames stay nested
+    // under their parent, so dragging them in the flat list would be a lie.
+    const canDragThis = canDragFrames && depth === 0;
+    const isFrameDropTarget = drag?.type === "frame" && dropTarget === gid && drag.id !== gid;
+    const isFrameDragging = drag?.type === "frame" && drag.id === gid;
     return (
       <div key={gid} className={depth === 0 ? "mt-1.5 first:mt-1" : ""}>
         <div
           className="group/grp flex items-center gap-0.5 h-8 pr-2 mx-2 rounded-lg hover:bg-[var(--color-bg3)] transition-colors"
-          style={{ paddingLeft: depth * 14 }}
+          style={{
+            paddingLeft: depth * 14,
+            ...(isFrameDropTarget ? { boxShadow: "inset 0 2px 0 0 var(--color-brand)" } : {}),
+            opacity: isFrameDragging ? 0.4 : undefined,
+          }}
           onContextMenu={frameActions ? (e) => { e.preventDefault(); setMenu({ frame, x: e.clientX, y: e.clientY }); } : undefined}
+          onDragOver={canDragThis ? (e) => {
+            if (drag?.type !== "frame") return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (dropTarget !== gid) setDropTarget(gid);
+          } : undefined}
+          onDrop={canDragThis ? (e) => {
+            e.preventDefault();
+            const rect = e.currentTarget.getBoundingClientRect();
+            const after = e.clientY - rect.top > rect.height / 2;
+            const ids = topFrames.map((f) => f.id);
+            const idx = ids.indexOf(gid);
+            dropFrameBefore(after ? (ids[idx + 1] ?? null) : gid);
+          } : undefined}
+          onDragEnd={canDragThis ? endDrag : undefined}
         >
+          {canDragThis && (
+            // Dedicated drag handle: the header already packs a chevron + a
+            // focus/rename button, so making the whole row draggable fought those
+            // clicks. A hover-revealed grip keeps the row's buttons clickable and
+            // gives an unambiguous "grab here to reorder" affordance.
+            <span
+              draggable
+              onDragStart={(e) => {
+                setDrag({ type: "frame", id: gid });
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", gid);
+              }}
+              className="shrink-0 -ml-1 grid h-5 w-3.5 place-items-center cursor-grab active:cursor-grabbing text-[var(--color-fg3)] opacity-0 group-hover/grp:opacity-100 transition-opacity"
+              title="Drag to reorder workspace"
+              aria-label="Reorder workspace"
+            >
+              <GripVertical size={13} />
+            </span>
+          )}
           <button
             onClick={() => toggleGroup(gid)}
             className="size-5 grid place-items-center rounded text-[var(--color-fg3)] hover:text-[var(--color-fg)]"
@@ -452,7 +571,7 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
               className="absolute top-0 bottom-1 w-px bg-[var(--color-line)]"
               style={{ left: depth * 14 + 18 }}
             />
-            {items.map((t) => renderTile(t, depth + 1))}
+            {items.map((t) => renderTile(t, depth + 1, gid))}
             {kids.map((k) => renderFrameGroup(k, depth + 1))}
           </div>
         )}
@@ -511,7 +630,7 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
                 <span className="ml-auto font-mono text-[11px] text-[var(--color-fg3)]">{looseTiles.length}</span>
               </span>
             </div>
-            {looseTiles.map((t) => renderTile(t, 1))}
+            {looseTiles.map((t) => renderTile(t, 1, LOOSE_BUCKET))}
           </div>
         )}
       </div>

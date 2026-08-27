@@ -6,14 +6,11 @@ import {
   Panel,
   ReactFlow,
   useReactFlow,
-  MarkerType,
   type Node,
   type Edge,
-  type Connection,
 } from "@xyflow/react";
 import { LayersPanel, type LayerTile, type LayerFrame } from "./LayersPanel";
-import { statusOf, setWaitStatus, setSubagentBusy, setNotify, setTurnState, waitForIdle, type TileStatusKind } from "./agent-status-bus";
-import { identifyAgent, HOOK_CAPABLE_AGENTS } from "./agent-state";
+import { statusOf, setWaitStatus, setSubagentBusy, setNotify, setTurnState, type TileStatusKind } from "./agent-status-bus";
 import { FRAME_ROW_MAX, frameAtPoint } from "./frame-layout";
 import { ToolIsland, ZoomIsland } from "./canvas-islands";
 import { Wallpaper } from "./Wallpaper";
@@ -25,8 +22,6 @@ import { Toasts, CanvasEmptyState } from "./canvas-overlays";
 import { nodeTypes, PinnedLayerContext, type PinRect } from "./canvas-nodes";
 import { clampAnchor } from "./pin-anchor";
 import { pipeEdgeTypes } from "./canvas-pipe-edge";
-import { workflowEdgeTypes } from "./canvas-workflow-edge";
-import { EdgePromptPopover, type EdgePromptValue } from "./components/EdgePromptPopover";
 import {
   snapViewportCrisp,
   FocusMode,
@@ -43,17 +38,12 @@ import {
   WORKBENCH_TILE_ID,
   type TileInstance,
   type FrameState,
-  type WorkflowEdge,
 } from "./canvas-persistence";
 import { useStateWithRef } from "./use-state-with-ref";
 import { defaultTileSize, defaultSizeForKind, FRAME_PAD, FRAME_HEADER } from "./canvas-sizing";
 import { useWorktrees } from "./useWorktrees";
 import { RemoteConnectModal } from "./components/RemoteConnectModal";
 import { SyncSettingsModal } from "./components/SyncSettingsModal";
-import { CommandButtonModal, type CmdButtonConfig } from "./components/CommandButtonModal";
-import { TriggerConfigModal, type TriggerConfig } from "./components/TriggerConfigModal";
-import { runWorkflow, type TriggerRunState } from "./workflow-engine";
-import { WorkflowScheduler } from "./workflow-scheduler";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { CanvasSpawnMenu, type CanvasSpawnMenuState } from "./CanvasSpawnMenu";
 import { isRemote } from "../../shared/remote-uri";
@@ -67,10 +57,15 @@ import { useCanvasShortcuts } from "./useCanvasShortcuts";
 import { useNodeDragStop } from "./useNodeDragStop";
 import { WindowsView } from "./WindowsView";
 import { GitCommitModal } from "./GitCommitModal";
+import { TileIssueLinkerModal } from "./TileIssueLinkerModal";
+import { WorkOnIssueModal } from "./components/WorkOnIssueModal";
 import { FilePickerModal } from "./FilePickerModal";
 import { useGitPush, useGitPull } from "./queries";import {
   loadViewMode, saveViewMode, loadMinimized, saveMinimized, nextActiveTab, type ViewMode,
 } from "./windows-view-state";
+import {
+  loadLayersOrder, saveLayersOrder, applyOrder, LOOSE_BUCKET, type LayersOrder,
+} from "./layers-order";
 import type { WorktreeEntry } from "../../shared/ipc";
 
 // snapViewportCrisp moved to canvas-camera.tsx
@@ -83,7 +78,7 @@ import type { WorktreeEntry } from "../../shared/ipc";
 // or inline `panOnDrag={[1,2]}` every render makes react-flow re-process its
 // internal state each frame. Hoisting them to module scope makes the ref constant.
 const EMPTY_EDGES: Edge[] = [];
-const ALL_EDGE_TYPES = { ...pipeEdgeTypes, ...workflowEdgeTypes };
+const ALL_EDGE_TYPES = pipeEdgeTypes;
 const PAN_ON_DRAG = [1, 2];
 const PRO_OPTIONS = { hideAttribution: true };
 // Snap on drop to an 8px grid (Figma's standard). The drop xyflow hands us is
@@ -194,6 +189,24 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
   const onSetFolder = useCallback((id: string, folder: string) => {
     setTiles((cur) => cur.map((t) => (t.id === id ? { ...t, folder } : t)));
   }, [setTiles]);
+  // Associate (or clear) the hivemind issue a running agent tile is working on.
+  // Bidirectional: fired by the tile header's "link to task" button AND by the
+  // issue peek's "associate a running terminal" picker. Persists on the
+  // TileInstance (like onSetFolder) so the link survives reload. Passing a null
+  // issue unlinks. Mirrored onto a window snapshot so the issue peek (which
+  // lives outside the Canvas tree) can read "which tiles are on this issue".
+  const linkTileToIssue = useCallback(
+    (id: string, issue: { id: string; root: string } | null) => {
+      setTiles((cur) =>
+        cur.map((t) =>
+          t.id === id
+            ? { ...t, issueId: issue?.id, issueRoot: issue?.root }
+            : t,
+        ),
+      );
+    },
+    [setTiles],
+  );
   // Live agent session titles from the terminal OSC window-title (claude writes
   // a task summary there). NOT persisted here — the DAEMON owns the title as
   // session state (persisted in its snapshot) and re-emits it ahead of the
@@ -204,21 +217,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
   const setAgentTitle = useCallback((id: string, title: string) => {
     setAgentTitles((m) => (m[id] === title ? m : { ...m, [id]: title }));
   }, []);
-  // Command Button create/edit modal. `tileId` targets the button being
-  // configured; `mode` picks the modal copy + whether a cancel should discard a
-  // just-spawned (never-configured) button.
-  const [cmdModal, setCmdModal] = useState<{ tileId: string; mode: "create" | "edit" } | null>(null);
-  // Open the edit modal for an existing (configured) button — wired into the
-  // tile's ⚙ via node data.
-  const editCmdButton = useCallback((id: string) => setCmdModal({ tileId: id, mode: "edit" }), []);
-  // Trigger create/edit modal — same shape as cmdModal above.
-  const [triggerModal, setTriggerModal] = useState<{ tileId: string; mode: "create" | "edit" } | null>(null);
-  const editTrigger = useCallback((id: string) => setTriggerModal({ tileId: id, mode: "edit" }), []);
-  // Per-trigger last-run outcome, shown on the tile's status line + used to
-  // highlight the live edge/node while a run is in flight (workflow-engine.ts).
-  const [triggerRuns, setTriggerRuns] = useState<Record<string, TriggerRunState>>({});
-  const triggerRunningRef = useRef<Set<string>>(new Set());
-  const [activeWorkflowStep, setActiveWorkflowStep] = useState<{ triggerId: string; activeEdgeId: string | null } | null>(null);
   const onNodeResizeCommit = useCallback((id: string, width: number, height: number, x?: number, y?: number) => {
     setSizes((s) => {
       const cur = s[id];
@@ -328,11 +326,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
   // tab cleanup too.)
   const closeTile = useCallback((id: string) => {
     unmarkBackgroundTile(id);
-    // A Command Button owns a main-process runner keyed by tile id — dispose it
-    // (kills any live script) so a closed button never leaves an orphan process.
-    if (tilesRef.current.find((t) => t.id === id)?.kind === "cmdButton") {
-      try { window.hive.cmdDispose(id); } catch { /* best-effort */ }
-    }
     setTiles((ts) => ts.filter((t) => t.id !== id));
     setBrowserOpenReqs((m) => {
       if (!(id in m)) return m;
@@ -390,182 +383,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
   // Explicit tile→frame membership (see PersistedLayout.frameOf). Authoritative
   // for auto-fit, parenting, and the chip strip — geometry never decides it.
   const [frameOf, setFrameOf, frameOfRef] = useStateWithRef<Record<string, string>>(initial.frameOf ?? {});
-  // User-authored workflow graph (trigger→agent→…→cmdButton). Persisted
-  // alongside the rest of the layout; see canvas-persistence.ts WorkflowEdge.
-  const [workflowEdges, setWorkflowEdges, workflowEdgesRef] =
-    useStateWithRef<WorkflowEdge[]>(initial.workflowEdges ?? []);
-
-  // ── Workflow engine wiring ────────────────────────────────────────────
-  // Real implementations of workflow-engine.ts's injected deps — everything
-  // agent-turn-related goes through the new hcp:invoke bridge (agent.send +
-  // agent.read, the SAME Mailbox/TurnTracker path MCP's mcp__hive__* tools
-  // already exercise); action steps reuse cmdRun/onCmdState verbatim.
-  const WORKFLOW_STEP_TIMEOUT_MS = 10 * 60_000; // matches HCP's own default worker-turn ceiling
-  const deliverStep = useCallback(async (tileId: string, message: string) => {
-    const tile = tilesRef.current.find((t) => t.id === tileId);
-    const agent = identifyAgent(tile?.cmd ?? "");
-    const hookCapable = agent != null && HOOK_CAPABLE_AGENTS.has(agent);
-    // A workflow step ONLY sends a message INTO the (already-running) agent tile
-    // — it never spawns a terminal or an agent. agent.send is Mailbox-safe: if
-    // the target is mid-turn (e.g. still booting), the message is HELD and typed
-    // in once the agent is back at its prompt (see hcp/mailbox.ts). We surface a
-    // clear error only if the tile has no live pty at all — the user must have
-    // placed/opened the agent tile first (that's how it worked before, unchanged).
-    const alive = (await window.hive.hcpInvoke("agent.alive", { tileId })) as { alive: boolean };
-    if (!alive.alive) {
-      throw new Error(
-        `step "${tile?.label ?? tileId}" has no running agent — open/spawn the ${agent ?? "agent"} tile before firing the workflow`,
-      );
-    }
-    await window.hive.hcpInvoke("agent.send", { tileId, text: message });
-    if (hookCapable) {
-      const res = (await window.hive.hcpInvoke("agent.read", { tileId, timeoutMs: WORKFLOW_STEP_TIMEOUT_MS })) as
-        { text: string | null; finalStatus: string; note?: string };
-      if (res.finalStatus !== "turn") {
-        throw new Error(res.note ?? `step ${tileId} timed out waiting for a reply`);
-      }
-      return { text: res.text };
-    }
-    // Hookless agent (codex, kiro, …) — TurnTracker/agent.read can never
-    // resolve for these (no Stop-hook-equivalent event exists), so fall back
-    // to the status-bus idle transition. No clean reply text is available
-    // for these providers — `includePrevReply` silently has nothing to
-    // prefix when the SOURCE of an edge is a hookless agent.
-    const finished = await waitForIdle(tileId, { timeoutMs: WORKFLOW_STEP_TIMEOUT_MS });
-    if (!finished) {
-      throw new Error(`step ${tileId} (${agent ?? "unknown agent"}) timed out waiting for it to go idle`);
-    }
-    return { text: null };
-  }, []);
-  const runAction = useCallback((tileId: string): Promise<{ ok: boolean; note?: string }> => {
-    const tile = tilesRef.current.find((t) => t.id === tileId);
-    const script = tile?.cmdButton?.script;
-    if (!script?.trim()) return Promise.resolve({ ok: false, note: "action has no script configured" });
-    return new Promise((resolve) => {
-      const unsub = window.hive.onCmdState(tileId, (s) => {
-        if (s.status === "done") { unsub(); resolve({ ok: true }); }
-        else if (s.status === "error") {
-          unsub();
-          resolve({ ok: false, note: s.signal ? `stopped (${s.signal})` : s.exitCode != null ? `exit ${s.exitCode}` : "failed" });
-        }
-      });
-      window.hive.cmdRun(tileId, script, tile?.cmdButton?.cwd).catch((e) => {
-        unsub();
-        resolve({ ok: false, note: (e as Error).message });
-      });
-    });
-  }, []);
-  // Fire a trigger's chain. Guarded against re-entry (a manual click while a
-  // scheduled tick — or a previous manual run — is already in flight for the
-  // SAME trigger no-ops; different triggers run independently).
-  const runTrigger = useCallback((triggerId: string) => {
-    if (triggerRunningRef.current.has(triggerId)) return;
-    triggerRunningRef.current.add(triggerId);
-    setTriggerRuns((m) => ({ ...m, [triggerId]: { status: "running" } }));
-    runWorkflow(
-      triggerId,
-      { edges: workflowEdgesRef.current, tiles: tilesRef.current },
-      {
-        deliverStep,
-        runAction,
-        onProgress: (p) => setActiveWorkflowStep(p.activeNodeId ? { triggerId: p.triggerId, activeEdgeId: p.activeEdgeId } : null),
-      },
-    ).then((res) => {
-      setTriggerRuns((m) => ({ ...m, [triggerId]: res }));
-    }).finally(() => {
-      triggerRunningRef.current.delete(triggerId);
-    });
-  }, [deliverStep, runAction]);
-
-  // ── Workflow connect UX ───────────────────────────────────────────────
-  // The prompt popover currently open, if any — `isNew` marks a just-created
-  // edge (from a fresh connect-drag) so Cancel discards it instead of merely
-  // closing (mirrors createCmdButton's create-vs-edit cancel semantics).
-  const [edgePromptAnchor, setEdgePromptAnchor] = useState<{ edgeId: string; x: number; y: number; isNew: boolean } | null>(null);
-  // Anchor point for the popover: the screen-space midpoint between the two
-  // nodes' flow positions. Edges have no stable DOM element to anchor a ref
-  // to (unlike FrameNode's AnchoredMenu), so this is computed from the same
-  // positions/sizes state the node-build memo already reads, then converted
-  // flow→screen by hand via the live viewport transform — Canvas is NOT
-  // inside a ReactFlowProvider (see onCanvasContextMenu's client→flow
-  // conversion above for the same reason/pattern, inverted here).
-  const edgeAnchorPoint = useCallback((sourceId: string, targetId: string): { x: number; y: number } => {
-    const sp = positionsRef.current[sourceId];
-    const tp = positionsRef.current[targetId];
-    const ss = sizesRef.current[sourceId] ?? defaultTileSize(sourceId);
-    const ts = sizesRef.current[targetId] ?? defaultTileSize(targetId);
-    const from = sp ? { x: sp.x + ss.width, y: sp.y + ss.height / 2 } : { x: 0, y: 0 };
-    const to = tp ? { x: tp.x, y: tp.y + ts.height / 2 } : from;
-    const fx = (from.x + to.x) / 2;
-    const fy = (from.y + to.y) / 2;
-    const rect = flowWrapRef.current?.getBoundingClientRect();
-    const vp = currentViewportRef.current;
-    if (!rect) return { x: fx, y: fy };
-    return { x: rect.left + vp.x + fx * vp.zoom, y: rect.top + vp.y + fy * vp.zoom };
-  }, []);
-
-  const onWorkflowConnect = useCallback((connection: Connection) => {
-    if (!connection.source || !connection.target || connection.source === connection.target) return;
-    const existing = workflowEdgesRef.current.find((e) => e.source === connection.source && e.target === connection.target);
-    const point = edgeAnchorPoint(connection.source, connection.target);
-    if (existing) {
-      setEdgePromptAnchor({ edgeId: existing.id, ...point, isNew: false });
-      return;
-    }
-    const id = `wf-${connection.source}-${connection.target}-${Date.now()}`;
-    setWorkflowEdges((es) => [...es, { id, source: connection.source!, target: connection.target!, includePrevReply: true }]);
-    setEdgePromptAnchor({ edgeId: id, ...point, isNew: true });
-  }, [edgeAnchorPoint]);
-
-  const onWorkflowEdgeDoubleClick = useCallback((e: React.MouseEvent, edge: Edge) => {
-    if (edge.type !== "workflow") return;
-    e.stopPropagation();
-    const point = edgeAnchorPoint(edge.source, edge.target);
-    setEdgePromptAnchor({ edgeId: edge.id, ...point, isNew: false });
-  }, [edgeAnchorPoint]);
-
-  const saveEdgePrompt = useCallback((v: EdgePromptValue) => {
-    if (!edgePromptAnchor) return;
-    const { edgeId } = edgePromptAnchor;
-    setWorkflowEdges((es) => es.map((e) => (e.id === edgeId ? { ...e, prompt: v.prompt, includePrevReply: v.includePrevReply } : e)));
-    setEdgePromptAnchor(null);
-  }, [edgePromptAnchor]);
-
-  const deleteWorkflowEdge = useCallback(() => {
-    if (!edgePromptAnchor) return;
-    const { edgeId } = edgePromptAnchor;
-    setWorkflowEdges((es) => es.filter((e) => e.id !== edgeId));
-    setEdgePromptAnchor(null);
-  }, [edgePromptAnchor]);
-
-  const cancelEdgePrompt = useCallback(() => {
-    if (edgePromptAnchor?.isNew) {
-      const { edgeId } = edgePromptAnchor;
-      setWorkflowEdges((es) => es.filter((e) => e.id !== edgeId));
-    }
-    setEdgePromptAnchor(null);
-  }, [edgePromptAnchor]);
-
-  // Schedule-mode triggers self-fire on an interval (workflow-scheduler.ts).
-  // runTrigger is stable (useCallback, stable deps) but indirect through a ref
-  // anyway — cheap insurance so the scheduler instance never has to be rebuilt.
-  const runTriggerRef = useRef(runTrigger);
-  useEffect(() => { runTriggerRef.current = runTrigger; }, [runTrigger]);
-  const schedulerRef = useRef<WorkflowScheduler | null>(null);
-  if (!schedulerRef.current) schedulerRef.current = new WorkflowScheduler((id) => runTriggerRef.current(id));
-  useEffect(() => {
-    const sched = schedulerRef.current!;
-    const liveTriggerIds = new Set<string>();
-    for (const t of tiles) {
-      if (t.kind !== "trigger") continue;
-      liveTriggerIds.add(t.id);
-      if (t.trigger?.mode === "schedule" && t.trigger.everyMs) sched.arm(t.id, t.trigger.everyMs);
-      else sched.cancel(t.id);
-    }
-    for (const armedId of sched.armedIds()) if (!liveTriggerIds.has(armedId)) sched.cancel(armedId);
-  }, [tiles]);
-  useEffect(() => () => schedulerRef.current?.cancelAll(), []);
-
   // The frame the user most recently touched (spawned into / dragged). The
   // collision-separation pass keeps THIS frame fixed and pushes neighbours, so
   // growing a frame never makes your focus jump.
@@ -601,7 +418,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     setTiles(next.tiles ?? []);
     setEditorTabs(next.editorTabs ?? {});
     setFrameOf(next.frameOf ?? {});
-    setWorkflowEdges(next.workflowEdges ?? []);
     if (next.viewport) setViewport(next.viewport);
   }, [persistKey]);
 
@@ -633,12 +449,12 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     if (typeof window === "undefined" || !persistKey) return;
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
-      saveLayout(persistKey, { sizes, positions, frames, tileNames, tiles, editorTabs, viewport, frameOf, workflowEdges });
+      saveLayout(persistKey, { sizes, positions, frames, tileNames, tiles, editorTabs, viewport, frameOf });
     }, 250);
     return () => {
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     };
-  }, [persistKey, sizes, positions, frames, tileNames, tiles, editorTabs, viewport, frameOf, workflowEdges]);
+  }, [persistKey, sizes, positions, frames, tileNames, tiles, editorTabs, viewport, frameOf]);
   // Flush on tab close / app quit so the debounced write doesn't lose the
   // last ~250ms of edits. `beforeunload` fires sync before localStorage is
   // torn down; we set the latest snapshot then.
@@ -648,11 +464,11 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
       if (!persistTimerRef.current) return;
       clearTimeout(persistTimerRef.current);
       persistTimerRef.current = undefined;
-      saveLayout(persistKey, { sizes, positions, frames, tileNames, tiles, editorTabs, viewport, frameOf, workflowEdges });
+      saveLayout(persistKey, { sizes, positions, frames, tileNames, tiles, editorTabs, viewport, frameOf });
     };
     window.addEventListener("beforeunload", flush);
     return () => window.removeEventListener("beforeunload", flush);
-  }, [persistKey, sizes, positions, frames, tileNames, tiles, editorTabs, viewport, frameOf, workflowEdges]);
+  }, [persistKey, sizes, positions, frames, tileNames, tiles, editorTabs, viewport, frameOf]);
 
   // Viewport-focus request: we resolve the target's CENTER from our own state
   // (positions/sizes/frames) and hand absolute coords to <FocusOnTile>, which
@@ -755,16 +571,87 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
   // show in the Layers panel, which derives its own list from agentTitles.)
   const framesChipNames = useMemo(() => ({ ...tileNames }), [tileNames]);
 
+  // Publish a snapshot of agent tiles + their issue links so the issue peek
+  // (rendered OUTSIDE this Canvas subtree, in App) can list "which agents are
+  // working on this issue" and offer the reverse "associate a running terminal"
+  // picker. A window global holds the latest snapshot (read on peek open) and a
+  // custom event notifies live subscribers. Cheap: recomputed only when tiles /
+  // names / frames change, not on every status tick.
+  useEffect(() => {
+    const snap = tiles
+      .filter((t) => t.kind === "claude" || t.kind === "shell")
+      .map((t) => ({
+        tileId: t.id,
+        name: tileNames[t.id] ?? agentTitles[t.id] ?? t.label,
+        frameId: frameOf[t.id] ?? null,
+        frameTitle: (frameOf[t.id] ? frames.find((f) => f.id === frameOf[t.id])?.title : undefined) ?? null,
+        issueId: t.issueId ?? null,
+        issueRoot: t.issueRoot ?? null,
+      }));
+    (window as unknown as { __hivemindAgentTiles?: unknown }).__hivemindAgentTiles = snap;
+    window.dispatchEvent(new CustomEvent("hivemind:agent-tiles-changed", { detail: snap }));
+
+    // Frames snapshot for the Work modal's frame picker (id + title + repo/branch).
+    const frameSnap = frames.map((f) => ({
+      id: f.id,
+      title: f.title,
+      branch: f.parentFrameId ? f.branch ?? null : null,
+      repo: ((f.worktreePath ?? f.workspacePath) || "").split("/").filter(Boolean).pop() ?? null,
+      isWorktree: !!f.parentFrameId,
+    }));
+    (window as unknown as { __hivemindFrames?: unknown }).__hivemindFrames = frameSnap;
+    window.dispatchEvent(new CustomEvent("hivemind:frames-changed", { detail: frameSnap }));
+  }, [tiles, tileNames, agentTitles, frameOf, frames]);
+
   // ── Figma-style Layers panel data ─────────────────────────────────────────
   // Every open tile flattened to { id, kind, name, frameId } for the left rail.
-  const layerFrames: LayerFrame[] = useMemo(
-    () => frames.map((f) => ({
+  //
+  // Manual drag-to-reorder: the user can drag rows in the Layers panel to set a
+  // custom sequence, persisted PER-REPO. The stored order is advisory — tiles
+  // and frames open/close outside the panel, so `applyOrder` uses it as a sort
+  // key and appends anything unseen (in live order) at the end. Reloaded when
+  // the persistence key changes; every reorder callback saves + updates state.
+  const [layersOrder, setLayersOrder] = useState<LayersOrder>(() => loadLayersOrder(persistKey));
+  useEffect(() => { setLayersOrder(loadLayersOrder(persistKey)); }, [persistKey]);
+  const onReorderFramesFromPanel = useCallback((orderedIds: string[]) => {
+    setLayersOrder((prev) => {
+      const next = { ...prev, frames: orderedIds };
+      saveLayersOrder(persistKey, next);
+      return next;
+    });
+  }, [persistKey]);
+  const onReorderTilesFromPanel = useCallback((bucket: string, orderedIds: string[]) => {
+    setLayersOrder((prev) => {
+      const next = { ...prev, tiles: { ...prev.tiles, [bucket]: orderedIds } };
+      saveLayersOrder(persistKey, next);
+      return next;
+    });
+  }, [persistKey]);
+
+  const layerFrames: LayerFrame[] = useMemo(() => {
+    const mapped: LayerFrame[] = frames.map((f) => ({
       id: f.id, title: f.title, color: f.color,
       parentFrameId: f.parentFrameId, branch: f.parentFrameId ? f.branch : undefined,
       remote: isRemote(f.workspacePath),
-    })),
-    [frames],
-  );
+    }));
+    // Only top-level (repo) frames carry a manual sequence; worktree sub-frames
+    // stay nested under their parent. Reassemble: reordered tops first, then
+    // everything else (children + defensive orphans) in original order — the
+    // panel re-nests by parentFrameId, so trailing children slot under a parent.
+    const topIds = mapped
+      .filter((f) => !f.parentFrameId || !mapped.some((p) => p.id === f.parentFrameId))
+      .map((f) => f.id);
+    const orderedTop = applyOrder(topIds, layersOrder.frames);
+    const byId = new Map(mapped.map((f) => [f.id, f]));
+    const out: LayerFrame[] = [];
+    const emitted = new Set<string>();
+    for (const id of orderedTop) {
+      const f = byId.get(id);
+      if (f) { out.push(f); emitted.add(id); }
+    }
+    for (const f of mapped) if (!emitted.has(f.id)) out.push(f);
+    return out;
+  }, [frames, layersOrder.frames]);
   const layerTiles: LayerTile[] = useMemo(() => {
     const out: LayerTile[] = [];
     const fo = frameOf;
@@ -1006,6 +893,47 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     return () => window.removeEventListener("hivemind:frame-git", onGit as EventListener);
   }, []);
 
+  // Issue↔agent association. Two entry points, one handler:
+  //   • `hivemind:link-tile-to-issue` {tileId, issueId, root}|{tileId, clear}
+  //     — a direct set/clear, fired by the issue peek (which knows the issue)
+  //     or by the linker modal below. issueId omitted / clear:true → unlink.
+  //   • `hivemind:open-tile-issue-linker` {tileId} — the tile header button;
+  //     opens the picker modal (Canvas owns the issue list via the app root).
+  const [issueLinkerTile, setIssueLinkerTile] = useState<string | null>(null);
+  const [workReq, setWorkReq] = useState<import("./components/WorkOnIssueModal").WorkModalReq | null>(null);
+  useEffect(() => {
+    const onLink = (e: Event) => {
+      const d = (e as CustomEvent<{ tileId?: string; issueId?: string; root?: string; clear?: boolean }>).detail;
+      if (!d?.tileId) return;
+      if (d.clear || !d.issueId) { linkTileToIssue(d.tileId, null); return; }
+      linkTileToIssue(d.tileId, { id: d.issueId, root: d.root ?? rootRef.current ?? "" });
+    };
+    const onOpenLinker = (e: Event) => {
+      const d = (e as CustomEvent<{ tileId?: string }>).detail;
+      if (d?.tileId) setIssueLinkerTile(d.tileId);
+    };
+    const onFocusTile = (e: Event) => {
+      const d = (e as CustomEvent<{ tileId?: string }>).detail;
+      if (!d?.tileId) return;
+      setSelectedTileId(d.tileId);
+      focusTile(d.tileId);
+    };
+    const onOpenWork = (e: Event) => {
+      const d = (e as CustomEvent<import("./components/WorkOnIssueModal").WorkModalReq>).detail;
+      if (d?.id) setWorkReq(d);
+    };
+    window.addEventListener("hivemind:link-tile-to-issue", onLink as EventListener);
+    window.addEventListener("hivemind:open-tile-issue-linker", onOpenLinker as EventListener);
+    window.addEventListener("hivemind:focus-tile", onFocusTile as EventListener);
+    window.addEventListener("hivemind:open-work-modal", onOpenWork as EventListener);
+    return () => {
+      window.removeEventListener("hivemind:link-tile-to-issue", onLink as EventListener);
+      window.removeEventListener("hivemind:open-tile-issue-linker", onOpenLinker as EventListener);
+      window.removeEventListener("hivemind:focus-tile", onFocusTile as EventListener);
+      window.removeEventListener("hivemind:open-work-modal", onOpenWork as EventListener);
+    };
+  }, [linkTileToIssue, focusTile]);
+
   // Single-file tile: pick a workspace file, then spawn a `file` tile bound to
   // it into the frame. Fired by the "File…" entries in the spawn menus.
   const [filePick, setFilePick] = useState<{ frameId: string; repoPath: string | null } | null>(null);
@@ -1036,74 +964,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     setFrameOf, setPositions, setSelectedTileId, setFocusReq, setFrames,
     setSelectedFrameId, setTiles, setSpawnPick, focusTile,
   });
-
-  // Create a new Command Button: spawn the tile (into the active/resolved frame,
-  // like any other tile), then immediately open the modal in create mode so the
-  // user names it + writes the script. A cancel from create mode discards the
-  // freshly-spawned empty button (below, in the modal wiring).
-  const createCmdButton = useCallback((targetFrameId?: string) => {
-    const id = `tile-cmdButton-${Date.now()}`;
-    if (targetFrameId) spawnTile("cmdButton", targetFrameId);
-    else spawnInto("cmdButton");
-    // spawnInto/spawnTile generates its own id; re-read the just-added tile so
-    // the modal targets it. Append is synchronous; the last never-configured
-    // cmdButton is ours. Use a microtask so the state has settled.
-    queueMicrotask(() => {
-      const fresh = tilesRef.current.filter((t) => t.kind === "cmdButton" && !t.cmdButton);
-      const target = fresh[fresh.length - 1];
-      setCmdModal({ tileId: target?.id ?? id, mode: "create" });
-    });
-  }, [spawnInto, spawnTile]);
-
-  // Persist a button's config: write the script/cwd onto the TileInstance and
-  // the name into the tileNames map (round-trips with the layout).
-  const submitCmdButton = useCallback((cfg: CmdButtonConfig) => {
-    if (!cmdModal) return;
-    const { tileId } = cmdModal;
-    setTiles((ts) => ts.map((t) => (t.id === tileId ? { ...t, cmdButton: { script: cfg.script, cwd: cfg.cwd } } : t)));
-    renameTile(tileId, cfg.name);
-    setCmdModal(null);
-  }, [cmdModal, renameTile]);
-
-  // Cancel: in CREATE mode a never-configured button is noise — drop it. In EDIT
-  // mode just close (keep the existing config + its live runner state).
-  const cancelCmdButton = useCallback(() => {
-    if (cmdModal?.mode === "create") {
-      const id = cmdModal.tileId;
-      const inst = tilesRef.current.find((t) => t.id === id);
-      if (inst && !inst.cmdButton) closeTile(id);
-    }
-    setCmdModal(null);
-  }, [cmdModal, closeTile]);
-
-  // Create a new Trigger — same spawn-then-configure dance as createCmdButton.
-  const createTrigger = useCallback((targetFrameId?: string) => {
-    const id = `tile-trigger-${Date.now()}`;
-    if (targetFrameId) spawnTile("trigger", targetFrameId);
-    else spawnInto("trigger");
-    queueMicrotask(() => {
-      const fresh = tilesRef.current.filter((t) => t.kind === "trigger" && !t.trigger);
-      const target = fresh[fresh.length - 1];
-      setTriggerModal({ tileId: target?.id ?? id, mode: "create" });
-    });
-  }, [spawnInto, spawnTile]);
-
-  const submitTrigger = useCallback((cfg: TriggerConfig) => {
-    if (!triggerModal) return;
-    const { tileId } = triggerModal;
-    setTiles((ts) => ts.map((t) => (t.id === tileId ? { ...t, trigger: { mode: cfg.mode, everyMs: cfg.everyMs } } : t)));
-    renameTile(tileId, cfg.name);
-    setTriggerModal(null);
-  }, [triggerModal, renameTile]);
-
-  const cancelTrigger = useCallback(() => {
-    if (triggerModal?.mode === "create") {
-      const id = triggerModal.tileId;
-      const inst = tilesRef.current.find((t) => t.id === id);
-      if (inst && !inst.trigger) closeTile(id);
-    }
-    setTriggerModal(null);
-  }, [triggerModal, closeTile]);
 
   // Right-click on empty canvas space → open the spawn menu. We hit-test the
   // click against the frames (innermost wins) so a component spawned from inside
@@ -1159,12 +1019,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     const repo = targetFrame.worktreePath ?? targetFrame.workspacePath ?? repoPathRef.current ?? null;
     setFilePick({ frameId: targetFrame.id, repoPath: repo });
   }, []);
-  const menuSpawnCommand = useCallback((frameId: string | null) => {
-    createCmdButton(frameId ?? undefined);
-  }, [createCmdButton]);
-  const menuSpawnTrigger = useCallback((frameId: string | null) => {
-    createTrigger(frameId ?? undefined);
-  }, [createTrigger]);
 
   // Rail context-menu actions — the SAME surface the on-canvas frame header
   // exposes, reused from the Layers rail (drives a workspace in windows mode,
@@ -1231,11 +1085,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
 
   const frameActions = useMemo(() => ({
     onOpenInFrame: (frameId: string, kind: string) => {
-      // A command button / trigger needs its create modal after spawn, so it
-      // can't go through the plain frameOpen spawn path — route it to the
-      // modal-aware creator, targeting this frame.
-      if (kind === "cmdButton") { createCmdButton(frameId); return; }
-      if (kind === "trigger") { createTrigger(frameId); return; }
       frameOpen(frameId, kind);
     },
     onOpenFilePicker: (frameId: string) =>
@@ -1261,7 +1110,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
       const f = framesRef.current.find((x) => x.id === frameId);
       return f?.worktreePath ?? f?.workspacePath ?? repoPath ?? null;
     },
-  }), [frameOpen, createCmdButton, onCreateWorktree, onAttachWorktree, bindWorkspace, arrangeFrame, updateFrameTitle, updateFrameColor, deleteFrame, repoPath, repoOfFrame, gitPushMut, gitPullMut, reparentFrame, nestTargetsFor]);
+  }), [frameOpen, onCreateWorktree, onAttachWorktree, bindWorkspace, arrangeFrame, updateFrameTitle, updateFrameColor, deleteFrame, repoPath, repoOfFrame, gitPushMut, gitPullMut, reparentFrame, nestTargetsFor]);
   const openFileFromTerminal = useCallback((sourceTileId: string, path: string) => {
     const sourceFrameId = frameOfRef.current[sourceTileId] ?? selectedFrameIdRef.current;
     const existing = tilesRef.current.find((t) => (
@@ -1515,31 +1364,41 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
   //     hive_get_issue and treat later "faça isso" as scoped to THIS task.
   useEffect(() => {
     const onWork = (e: Event) => {
-      const d = (e as CustomEvent<{ root: string | null; id: string; title?: string; agent?: string; model?: string }>).detail;
+      const d = (e as CustomEvent<{ root: string | null; id: string; title?: string; agent?: string; model?: string; frameId?: string; extraPrompt?: string }>).detail;
       if (!d?.id) return;
       const norm = (p?: string | null) => (p ? p.replace(/\/+$/, "").replace(/\/\.hivemind$/, "") : "");
       const issueRepo = norm(d.root);
-      // Prefer a frame bound to the issue's workspace (by root or repo path).
+      // Frame resolution: an EXPLICIT frameId (from the Work modal) wins; else a
+      // frame bound to the issue's workspace (by root or repo path); else a
+      // fresh frame.
+      const explicit = d.frameId ? framesRef.current.find((f) => f.id === d.frameId) : undefined;
       const frame =
+        explicit ??
         framesRef.current.find(
           (f) => norm(f.workspaceRoot) === norm(d.root) || (!!issueRepo && norm(f.workspacePath) === issueRepo),
         ) ?? undefined;
       const reg = d.agent ? agentById(d.agent) : undefined;
-      const work =
+      let work =
         `You are working on task ${d.id}${d.title ? ` — "${d.title}"` : ""}. ` +
         `First load it with hive_get_issue ${d.id} to read the description and acceptance criteria. ` +
         `Implement it end-to-end, tick acceptance criteria as you go, and finish by setting its state with hive_set_state. ` +
         `Treat any later instruction like "faça isso"/"do this" as referring to THIS task (${d.id}) — re-read it with hive_get_issue if unsure.`;
+      // Append the user's extra prompt from the Work modal, clearly delimited.
+      if (d.extraPrompt) work += `\n\nAdditional instructions from the user:\n${d.extraPrompt}`;
       const targetFrameId = frame?.id ?? ensureFrame().id;
+      // Associate the spawned agent tile with this issue so it shows up in the
+      // issue's Agents section + carries the header chip.
+      const link = { issueId: d.id, issueRoot: d.root ?? undefined };
       // A recognized registry agent (codex/opencode/…) spawns with its binary;
       // claude (or an unknown/custom id) spawns as claude carrying the prompt.
       if (reg && reg.id !== "claude") {
         spawnTile("claude", targetFrameId, {
           agent: { id: reg.id, cmd: reg.cmd, args: reg.defaultArgs, label: reg.label },
           work,
+          ...link,
         });
       } else {
-        spawnTile("claude", targetFrameId, { work });
+        spawnTile("claude", targetFrameId, { work, ...link });
       }
     };
     window.addEventListener("hivemind:work-on-issue", onWork as EventListener);
@@ -1555,7 +1414,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
 
   // Keyboard shortcuts + menu event listeners. See useCanvasShortcuts.
   useCanvasShortcuts({
-    repoPath, spawnClaude, spawnSelectedAgent, spawnVis, spawnBrowser: () => spawnInto("browser"), spawnCmdButton: createCmdButton, spawnTrigger: createTrigger, addFrame, frameOpen, focusTile,
+    repoPath, spawnClaude, spawnSelectedAgent, spawnVis, spawnBrowser: () => spawnInto("browser"), addFrame, frameOpen, focusTile,
     setSelectedTileId, setFocusModeReq, selectedTileIdRef, selectedFrameIdRef,
     focusModeNonceRef, tilesRef,
   });
@@ -1636,7 +1495,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     updateFrameTitle, updateFrameColor, deleteFrame, arrangeFrame, bringFrameToFront,
     onAttachWorktree, onCreateWorktree, unbindBranch, bindWorkspace, unbindWorkspace,
     openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, onNodeResizeCommit, renameTile, setAgentTitle,
-    editCmdButton, editTrigger, runTrigger, triggerRuns,
     onTogglePin: togglePin, onPinChange,
   }), [
     repoPath, root, cwd, tiles, editorTabs, browserOpenReqs, frames, frameOf, pinnedIds, sizes, positions,
@@ -1645,8 +1503,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     unbindBranch, onNodeResizeCommit, frameTiles, tileNames, bindWorkspace,
     // agentTitles intentionally NOT a dep: a live title change must not rebuild
     // the react-flow node array (cursor-flicker + focus loss while streaming).
-    unbindWorkspace, renameTile, framesChipNames, setAgentTitle, togglePin, onPinChange, editCmdButton,
-    editTrigger, runTrigger, triggerRuns,
+    unbindWorkspace, renameTile, framesChipNames, setAgentTitle, togglePin, onPinChange
   ]);
   // Derive selection-aware nodes from baseNodes. Shallow-clones ONLY the
   // currently-selected and previously-selected tile so other nodes keep their
@@ -1666,44 +1523,19 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
       return { ...n, selected: true, style: { ...(n.style ?? {}), zIndex: 1000 } };
     });
   }, [baseNodes, selectedTileId]);
-  // Agent pipes (hive_connect) → animated "data flow" edges. Main pushes
-  // connect/disconnect over "hcp:pipe"; we draw an edge per pipe whose endpoints
-  // both still exist as tiles (a closed tile's edge silently drops).
+  // Agent pipes (hive_connect) → animated data-flow edges. Spawn-parentage
+  // links remain visible too, so a developer can inspect who created a worker.
   const edges = useMemo<Edge[]>(() => {
-    if (pipes.length === 0 && spawnLinks.length === 0 && workflowEdges.length === 0) return EMPTY_EDGES;
+    if (pipes.length === 0 && spawnLinks.length === 0) return EMPTY_EDGES;
     const ids = new Set(tiles.map((t) => t.id));
-    const kindOf = new Map(tiles.map((t) => [t.id, t.kind]));
-    // Spawn wires (dashed parentage, parent → child) sit UNDER the animated data
-    // pipes. A pipe between the same pair visually wins (higher zIndex).
     const spawnEdges: Edge[] = spawnLinks
       .filter((l) => ids.has(l.parent) && ids.has(l.child))
       .map((l) => ({ id: `spawn-${l.parent}-${l.child}`, source: l.parent, target: l.child, type: "spawn", zIndex: 1900 }));
     const pipeEdges: Edge[] = pipes
       .filter((p) => ids.has(p.src) && ids.has(p.dst))
       .map((p) => ({ id: `flow-${p.src}-${p.dst}`, source: p.src, target: p.dst, type: "dataflow", zIndex: 2000 }));
-    // User-authored workflow edges — Handle-anchored (see canvas-workflow-edge.tsx),
-    // drawn UNDER the live HCP pipes so an executing step's animated dataflow
-    // pipe (if the two also happen to be piped) doesn't get visually buried.
-    const workflowRenderEdges: Edge[] = workflowEdges
-      .filter((e) => ids.has(e.source) && ids.has(e.target))
-      .map((e) => {
-        // An edge into a cmdButton has no prompt concept — it's never "missing
-        // a prompt", it just triggers a run.
-        const promptless = kindOf.get(e.target) === "cmdButton";
-        const hasPrompt = promptless || !!e.prompt?.trim();
-        const active = activeWorkflowStep?.activeEdgeId === e.id;
-        // Directional arrowhead, color-matched to the line (same rule
-        // WorkflowEdgeComponent uses for its stroke) so the edge always shows
-        // WHICH WAY the step flows, not just that a connection exists.
-        const color = active ? "var(--color-brand)" : hasPrompt ? "var(--color-fg2)" : "var(--color-err)";
-        return {
-          id: e.id, source: e.source, target: e.target, type: "workflow", zIndex: 1800,
-          data: { active, hasPrompt },
-          markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color },
-        };
-      });
-    return [...workflowRenderEdges, ...spawnEdges, ...pipeEdges];
-  }, [pipes, spawnLinks, tiles, workflowEdges, activeWorkflowStep]);
+    return [...spawnEdges, ...pipeEdges];
+  }, [pipes, spawnLinks, tiles]);
 
   // MiniMap is opt-in — its `pannable zoomable` re-renders every node mini-rect
   // on every pan/zoom frame, a real cost with several live tiles. Off by default.
@@ -1969,8 +1801,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={ALL_EDGE_TYPES}
-          onConnect={onWorkflowConnect}
-          onEdgeDoubleClick={onWorkflowEdgeDoubleClick}
           defaultViewport={initial.viewport ?? DEFAULT_VIEWPORT}
           minZoom={0.25}
           maxZoom={2.5}
@@ -2097,7 +1927,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
               onSpawnAgent={(a) => spawnAgent(a)}
               onFrame={addFrame}
               onBrowser={() => spawnInto("browser")}
-              onCmdButton={createCmdButton}
               onTheme={() => setCustomizerOpen((o) => !o)}
               updateAvailable={updateAvailable}
               onUpgrade={() => onUpgrade?.()}
@@ -2222,59 +2051,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
         />
         <SyncSettingsModal root={syncSettingsRoot} onClose={() => setSyncSettingsRoot(null)} />
         <ThemeCustomizer open={customizerOpen} onClose={() => setCustomizerOpen(false)} />
-        {cmdModal && (() => {
-          const inst = tiles.find((t) => t.id === cmdModal.tileId);
-          const initial = cmdModal.mode === "edit" && inst?.cmdButton
-            ? { name: tileNames[inst.id] ?? inst.label, script: inst.cmdButton.script, cwd: inst.cmdButton.cwd }
-            : undefined;
-          // The cwd the button would inherit from its frame/workspace (shown as
-          // the placeholder for the optional override field).
-          const owningFrame = frames.find((f) => f.id === frameOf[cmdModal.tileId]);
-          const defaultCwd = owningFrame?.worktreePath ?? owningFrame?.workspacePath ?? repoPath ?? cwd ?? null;
-          return (
-            <CommandButtonModal
-              open
-              onOpenChange={(o) => { if (!o) cancelCmdButton(); }}
-              initial={initial}
-              defaultCwd={defaultCwd}
-              onSubmit={submitCmdButton}
-            />
-          );
-        })()}
-        {triggerModal && (() => {
-          const inst = tiles.find((t) => t.id === triggerModal.tileId);
-          const initial = triggerModal.mode === "edit" && inst?.trigger
-            ? { name: tileNames[inst.id] ?? inst.label, mode: inst.trigger.mode, everyMs: inst.trigger.everyMs }
-            : undefined;
-          return (
-            <TriggerConfigModal
-              open
-              onOpenChange={(o) => { if (!o) cancelTrigger(); }}
-              initial={initial}
-              onSubmit={submitTrigger}
-            />
-          );
-        })()}
-        {edgePromptAnchor && (() => {
-          const edge = workflowEdges.find((e) => e.id === edgePromptAnchor.edgeId);
-          if (!edge) return null;
-          const sourceTile = tiles.find((t) => t.id === edge.source);
-          const targetTile = tiles.find((t) => t.id === edge.target);
-          const promptless = targetTile?.kind === "cmdButton";
-          const showIncludePrevReply = sourceTile?.kind !== "trigger";
-          return (
-            <EdgePromptPopover
-              x={edgePromptAnchor.x}
-              y={edgePromptAnchor.y}
-              initial={{ prompt: edge.prompt ?? "", includePrevReply: edge.includePrevReply ?? true }}
-              promptless={promptless}
-              showIncludePrevReply={showIncludePrevReply}
-              onSave={saveEdgePrompt}
-              onDelete={deleteWorkflowEdge}
-              onClose={cancelEdgePrompt}
-            />
-          );
-        })()}
         {claudePick && (
           // z above the tile fullscreen overlay (z-[9999]) so the picker shows ON
           // TOP of a fullscreened diff/editor instead of behind it.
@@ -2336,6 +2112,21 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
         open={gitModalRepo !== null}
         onOpenChange={(o) => { if (!o) setGitModalRepo(null); }}
       />
+      {/* Associate a running agent tile with a hivemind issue (the tile→issue
+          half of the bidirectional link; the reverse lives in IssuePeek). */}
+      <TileIssueLinkerModal
+        tileId={issueLinkerTile}
+        root={root}
+        currentIssueId={issueLinkerTile ? tiles.find((t) => t.id === issueLinkerTile)?.issueId ?? null : null}
+        open={issueLinkerTile !== null}
+        onOpenChange={(o) => { if (!o) setIssueLinkerTile(null); }}
+      />
+      {/* Work launcher — pick agent + frame + extra prompt before spawning. */}
+      <WorkOnIssueModal
+        req={workReq}
+        open={workReq !== null}
+        onOpenChange={(o) => { if (!o) setWorkReq(null); }}
+      />
       {/* Single-file tile picker — choose a workspace file, then spawn a `file`
           tile bound to it into the target frame. */}
       <FilePickerModal
@@ -2364,8 +2155,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
           onSpawnAgent={menuSpawnAgent}
           onSpawnKind={menuSpawnKind}
           onSpawnFile={menuSpawnFile}
-          onSpawnCommand={menuSpawnCommand}
-          onSpawnTrigger={menuSpawnTrigger}
         />
       )}
     </div>

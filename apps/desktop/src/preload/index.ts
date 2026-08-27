@@ -61,6 +61,7 @@ const api: HiveIpc & {
     ipcRenderer.invoke("testSyncConnection", root, providerId, settings, secret),
   clearSyncConfig: (root) => ipcRenderer.invoke("clearSyncConfig", root),
   runSync: (root) => ipcRenderer.invoke("runSync", root),
+  listSyncAreas: (root) => ipcRenderer.invoke("listSyncAreas", root),
   setRemoteState: (root, id, state) => ipcRenderer.invoke("setRemoteState", root, id, state),
 
   listWorkspaces: () => ipcRenderer.invoke("listWorkspaces"),

@@ -198,6 +198,19 @@ export function useSyncConfig(root: string | null | undefined) {
   });
 }
 
+/** Board taxonomy (Azure area paths + teams) for the New-issue Area picker.
+ *  Enabled only when a root is present; the handler is best-effort and returns
+ *  empty lists on any failure, so the modal falls back to free-text. Cached a
+ *  while — the area tree changes rarely. */
+export function useSyncAreas(root: string | null | undefined) {
+  return useQuery<{ areas: import("../../shared/ipc").SyncTaxonomyNode[]; teams: import("../../shared/ipc").SyncTaxonomyNode[] }>({
+    queryKey: ["sync-areas", root],
+    queryFn: () => (root ? window.hive.listSyncAreas(root) : Promise.resolve({ areas: [], teams: [] })),
+    enabled: !!root,
+    staleTime: 5 * 60_000,
+  });
+}
+
 export function useSetSyncConfig() {
   const qc = useQueryClient();
   return useMutation<

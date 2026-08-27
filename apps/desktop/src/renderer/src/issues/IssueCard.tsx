@@ -16,6 +16,15 @@ const onActivate = (fn: () => void) => (e: KeyboardEvent) => {
   }
 };
 
+/** The visible remote-tracker ref for a card, e.g. "AB#1234" (Azure) or
+ *  "#1234" (other providers), from the issue's sync link. Null when the issue
+ *  isn't linked (or is only pending creation upstream). */
+function remoteRef(issue: IssueSummary): string | null {
+  const s = (issue.sync ?? []).find((x) => x.externalId && x.externalId !== "__pending__");
+  if (!s) return null;
+  return s.provider === "azure-devops" ? `AB#${s.externalId}` : `#${s.externalId}`;
+}
+
 /** Board card — id + state icon, title, labels, assignee, work button. Draggable
  *  only when the tile is focused (so it doesn't fight canvas pan). */
 export function IssueCard({
@@ -52,6 +61,7 @@ export function IssueCard({
       <div className="flex items-center gap-1.5">
         <StateIcon state={issue.state} size={11} />
         <span className="font-mono text-[11px] text-[var(--color-fg2)] tabular-nums">{issue.id}</span>
+        {(() => { const r = remoteRef(issue); return r ? <span className="font-mono text-[10px] text-[var(--color-info)]">{r}</span> : null; })()}
         <button
           className="nodrag ml-auto inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 text-[11px] px-1.5 py-0.5 rounded-md text-white bg-[var(--color-brand)] hover:opacity-90 cursor-pointer hm-soft"
           aria-label={`Spawn claude to work on ${issue.id}`}
@@ -100,6 +110,7 @@ export function IssueRow({ issue, root, onWork }: { issue: IssueSummary; root: s
       <StateIcon state={issue.state} size={12} />
       <span className="font-mono text-[11px] text-[var(--color-fg3)] tabular-nums w-20 shrink-0">{issue.id}</span>
       <span className="text-[12px] text-[var(--color-fg)] truncate flex-1 min-w-0">{issue.title}</span>
+      {(() => { const r = remoteRef(issue); return r ? <span className="font-mono text-[10px] text-[var(--color-info)] shrink-0">{r}</span> : null; })()}
       {issue.labels.slice(0, 2).map((l) => (
         <LabelChip key={l} label={l} />
       ))}

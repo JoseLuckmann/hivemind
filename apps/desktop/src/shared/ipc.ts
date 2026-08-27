@@ -20,6 +20,14 @@ export interface SyncBoardConfig {
   lastSyncedAt: string | null;
 }
 
+/** A board-taxonomy node (Azure area path or team) for the New-issue Area
+ *  picker. `path` is stored on the issue (the full area path); `name` is the
+ *  short display label. Mirrors core's RemoteTaxonomyNode. */
+export interface SyncTaxonomyNode {
+  path: string;
+  name: string;
+}
+
 /** A registered workspace (subset of the core registry entry — display shape
  *  for the renderer; avoids pulling node-only registry deps into the web tsconfig). */
 export interface WorkspaceInfo {
@@ -244,9 +252,12 @@ export interface HiveIpc {
     opts: {
       title: string;
       state?: IssueSummary["state"];
+      type?: import("@hivemind/core/types").IssueType;
       parent?: string;
       labels?: string[];
       assignee?: Issue["assignee"];
+      preferredFrame?: string;
+      preferredAgent?: string;
       description?: string;
       acceptanceCriteria?: AcceptanceItem[];
       /** External-tracker hint: create the mirror on this board/type on the
@@ -284,6 +295,10 @@ export interface HiveIpc {
   clearSyncConfig(root: string): Promise<void>;
   /** Run a sync pass now, using the board's saved config + secret. */
   runSync(root: string): Promise<SyncReport>;
+  /** Board taxonomy for the New-issue Area picker — the tracker's area paths
+   *  (boards) + teams. Best-effort: empty lists when the provider has no area
+   *  concept or the call fails (the modal falls back to a free-text field). */
+  listSyncAreas(root: string): Promise<{ areas: SyncTaxonomyNode[]; teams: SyncTaxonomyNode[] }>;
   /** Explicitly move a linked issue's REMOTE board state (Azure column),
    *  independent of the local Kanban state. */
   setRemoteState(root: string, id: string, state: IssueState): Promise<void>;

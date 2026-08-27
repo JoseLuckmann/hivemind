@@ -19,12 +19,6 @@ export interface CanvasShortcutsCtx {
   spawnVis: (which: "tree" | "shell" | "diff" | "issues") => void;
   /** Spawn a Browser tile into the active/resolved frame. */
   spawnBrowser: () => void;
-  /** Create a new Command Button tile (opens the create/edit modal). Optional
-   *  frameId targets a specific frame (from a frame's add menu). */
-  spawnCmdButton: (frameId?: string) => void;
-  /** Create a new Trigger tile — the start of a workflow (opens the create/edit
-   *  modal). Optional frameId targets a specific frame. */
-  spawnTrigger: (frameId?: string) => void;
   addFrame: () => void;
   frameOpen: (frameId: string, kind: string) => void;
   focusTile: (id: string) => void;
@@ -38,7 +32,7 @@ export interface CanvasShortcutsCtx {
 
 export function useCanvasShortcuts(ctx: CanvasShortcutsCtx) {
   const {
-    repoPath, spawnClaude, spawnSelectedAgent, spawnVis, spawnBrowser, spawnCmdButton, spawnTrigger, addFrame, frameOpen, focusTile,
+    repoPath, spawnClaude, spawnSelectedAgent, spawnVis, spawnBrowser, addFrame, frameOpen, focusTile,
     setSelectedTileId, setFocusModeReq, selectedTileIdRef, selectedFrameIdRef,
     focusModeNonceRef, tilesRef,
   } = ctx;
@@ -95,8 +89,6 @@ export function useCanvasShortcuts(ctx: CanvasShortcutsCtx) {
         case "5": if (repoPath) { e.preventDefault(); spawnVis("issues"); } break;
         case "6": e.preventDefault(); addFrame(); break;
         case "7": e.preventDefault(); spawnBrowser(); break;
-        case "8": e.preventDefault(); spawnCmdButton(); break;
-        case "9": e.preventDefault(); spawnTrigger(); break;
         case "F2": {
           const sel = selectedFrameIdRef.current;
           if (!sel) return;
@@ -111,10 +103,6 @@ export function useCanvasShortcuts(ctx: CanvasShortcutsCtx) {
     const onFrameOpen = (e: Event) => {
       const d = (e as CustomEvent<{ frameId: string; kind: string }>).detail;
       if (!d?.frameId || !d?.kind) return;
-      // A command button / trigger needs its create modal after spawn — route
-      // it to the modal-aware creator instead of the plain frameOpen spawn path.
-      if (d.kind === "cmdButton") { spawnCmdButton(d.frameId); return; }
-      if (d.kind === "trigger") { spawnTrigger(d.frameId); return; }
       frameOpen(d.frameId, d.kind);
     };
     // Ctrl/Cmd+. (forwarded from main → App) focuses the selected tile. Same

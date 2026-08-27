@@ -855,17 +855,6 @@ async function installAgenticStack(dir: string, root: string): Promise<void> {
     await fsp.mkdir(path.dirname(browserSkillPath), { recursive: true });
     await fsp.writeFile(browserSkillPath, templates.hiveBrowserSkill(), "utf8");
   }
-
-  // hive-workflow skill — teaches an agent to fan work out via hive_workflow.
-  // This one is hivemind-managed: unlike the write-if-absent skills above, it is
-  // REGENERATED on every init so it tracks the app version across upgrades.
-  try {
-    const workflowSkillPath = path.join(dir, ".claude", "skills", "hive-workflow", "SKILL.md");
-    await fsp.mkdir(path.dirname(workflowSkillPath), { recursive: true });
-    await fsp.writeFile(workflowSkillPath, templates.hiveWorkflowSkill(), "utf8");
-  } catch {
-    /* best-effort — a skill write failure must not block init */
-  }
 }
 
 // Ensure the agentic stack exists for an already-initialized workspace (called
@@ -1052,6 +1041,26 @@ ipcMain.handle(
     const config = provider.parseConfig(cfg.sync.settings);
     await sync.setRemoteState(root, provider, config, secret, id, state);
     await writeAgentContext(root);
+  })
+);
+ipcMain.handle(
+  "listSyncAreas",
+  wrap(async (_e, root: string) => {
+    // Board taxonomy for the New-issue Area picker. Best-effort: a provider
+    // without area/team support (or a failed call) yields empty lists rather
+    // than throwing, so the modal quietly falls back to a free-text field.
+    const cfg = await readConfig(root);
+    if (!cfg.sync) return { areas: [], teams: [] };
+    const provider = sync.syncProviderFor(cfg.sync.providerId);
+    if (!provider) return { areas: [], teams: [] };
+    const secret = getSyncSecret(root, cfg.sync.providerId);
+    if (!secret) return { areas: [], teams: [] };
+    const config = provider.parseConfig(cfg.sync.settings);
+    const [areas, teams] = await Promise.all([
+      provider.listAreas ? provider.listAreas(config, secret).catch(() => []) : Promise.resolve([]),
+      provider.listTeams ? provider.listTeams(config, secret).catch(() => []) : Promise.resolve([]),
+    ]);
+    return { areas, teams };
   })
 );
 
@@ -1867,14 +1876,7 @@ ipcMain.handle("cmd:getState", wrap(async (_e, tileId: string) => getCmdState(ti
 ipcMain.handle("cmd:getOutput", wrap(async (_e, tileId: string) => getCmdOutput(tileId)));
 ipcMain.on("cmd:stop", (_e, tileId: string) => stopCmd(tileId));
 ipcMain.on("cmd:reset", (_e, tileId: string) => resetCmd(tileId));
-ipcMain.on("cmd:dispose", (_e, tileId: string) => disposeCmd(tileId));
-// Renderer → HCP dispatch (the mirror of hcp:command/hcp:result, which only
-// ever goes main→renderer). Generic on the wire: any verb dispatch() knows —
-// agent.send, agent.read, tile.connect, … — reachable without a socket/MCP
-// hop. See the hcpDispatch hoist above for why this is safe before the
-// control plane has started (throws a clear error instead of hanging).
-ipcMain.handle("hcp:invoke", wrap(async (_e, method: string, params?: unknown) => hcpDispatch(method, params)));
-// Anti-fork-bomb: at most 16 HCP agent spawns per rolling minute.
+ipcMain.on("cmd:dispose", (_e, tileId: string) => disposeCmd(tileId));// Anti-fork-bomb: at most 16 HCP agent spawns per rolling minute.
 let hcpSpawnTimes: number[] = [];
 function hcpSpawnAllowed(): boolean {
   const now = Date.now();
@@ -1911,7 +1913,6 @@ function startHcpControlPlane(): void {
   });
   const dispatch = _hcp.dispatch;
   hcpForgetTile = _hcp.forgetTile; // wire the pty-exit teardown to the dispatch's per-tile cleanup
-  hcpDispatch = dispatch; // let hcp:invoke (renderer-initiated calls) reach the same dispatch
   const server = startHcpServer(hcpSockPath(userData), {
     token,
     rendererUp: () => !!mainWindow && !mainWindow.isDestroyed(),

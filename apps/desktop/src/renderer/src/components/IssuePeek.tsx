@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Play, FileQuestion, X } from "lucide-react";
-import type { AcceptanceItem, Issue, IssueState, LinkType } from "@hivemind/core/types";
+import { useQueryClient } from "@tanstack/react-query";
+import type { AcceptanceItem, Issue, IssueState, IssueType, LinkType } from "@hivemind/core/types";
 import {
   Dialog,
   DialogContent,
@@ -19,10 +20,27 @@ import {
   useWorkspaces,
   useSyncConfig,
   useSetRemoteState,
+  useRunSync,
 } from "../queries";
 import { STATE_COLOR, STATE_LABEL, STATE_ORDER, StateIcon } from "./StateMeta";
 import { AssigneePicker, LabelPicker, ParentPicker } from "../issues/pickers";
 import { SubIssueTree } from "../issues/SubIssueTree";
+import { IssueAgents } from "./IssueAgents";
+import { AGENTS } from "../agents";
+
+/** Enabled agents offered in the "Preferred agent" picker. */
+const WORK_AGENTS = AGENTS.filter((a) => a.enabled);
+
+/** Canonical issue types for the Type picker (label = display). */
+const ISSUE_TYPE_OPTIONS: { value: IssueType; label: string }[] = [
+  { value: "epic", label: "Epic" },
+  { value: "feature", label: "Feature" },
+  { value: "story", label: "Story" },
+  { value: "bug", label: "Bug" },
+  { value: "support", label: "Apoio" },
+  { value: "spike", label: "Spike" },
+  { value: "task", label: "Task" },
+];
 
 // Lazy: marked + DOMPurify (+ mermaid on demand) load only when a description
 // actually renders. Reuses the editor's renderer.
@@ -44,6 +62,8 @@ export function IssuePeek({ root, id, onClose }: Props) {
   const del = useDeleteIssue();
   const { data: syncConfig } = useSyncConfig(root);
   const setRemoteState = useSetRemoteState();
+  const runSync = useRunSync();
+  const qc = useQueryClient();
 
   // Workspace-wide issue list powers the editable pickers + sub-issue tree.
   const { data: allIssues = [] } = useIssues(root);
@@ -96,6 +116,37 @@ export function IssuePeek({ root, id, onClose }: Props) {
               {issue.github != null && (
                 <span className="font-mono text-[11px] text-[var(--color-info)]">#{issue.github}</span>
               )}
+              {issue.type && (
+                <span className="text-[10px] uppercase tracking-wide px-1.5 h-4 inline-flex items-center rounded bg-[var(--color-bg3)] text-[var(--color-fg2)] font-medium" title="Issue type">
+                  {issue.type}
+                </span>
+              )}
+              {(() => {
+                // Visible remote (Azure) id — AB#<externalId>, linked to the work
+                // item, plus the remote board's current state when known. Sourced
+                // from the issue's sync link (any provider); AB# is Azure's own
+                // commit/PR linking syntax, so it doubles as the copy-paste ref.
+                const remote = (issue.sync ?? []).find(
+                  (s) => s.externalId && s.externalId !== "__pending__",
+                );
+                if (!remote) return null;
+                const label = remote.provider === "azure-devops" ? `AB#${remote.externalId}` : `#${remote.externalId}`;
+                const chip = (
+                  <span className="inline-flex items-center gap-1 font-mono text-[11px] text-[var(--color-info)]">
+                    {label}
+                    {remote.remoteState && (
+                      <span className="text-[10px] text-[var(--color-fg3)]">· {remote.remoteState}</span>
+                    )}
+                  </span>
+                );
+                return remote.url ? (
+                  <a href={remote.url} target="_blank" rel="noreferrer" title={`Open ${label} in ${remote.provider}`} className="hover:underline">
+                    {chip}
+                  </a>
+                ) : (
+                  <span title={remote.provider}>{chip}</span>
+                );
+              })()}
               <div className="ml-auto flex items-center gap-1">
                 <button
                   onClick={async () => {
@@ -103,17 +154,25 @@ export function IssuePeek({ root, id, onClose }: Props) {
                     if (repoDir) {
                       try { await window.hive.installAgentic(repoDir); } catch { /* best-effort */ }
                     }
-                    const agent = issue.assignee?.type === "agent" ? issue.assignee.id : undefined;
-                    const model = issue.assignee?.type === "agent" ? issue.assignee.model : undefined;
+                    // Open the Work modal (agent + frame + extra prompt) instead
+                    // of spawning directly. Prefill from the issue's preferences.
                     window.dispatchEvent(
-                      new CustomEvent("hivemind:work-on-issue", {
-                        detail: { root, id: issue.id, title: issue.title, agent, model },
+                      new CustomEvent("hivemind:open-work-modal", {
+                        detail: {
+                          root,
+                          id: issue.id,
+                          title: issue.title,
+                          preferredFrame: issue.preferredFrame,
+                          preferredAgent:
+                            issue.preferredAgent ??
+                            (issue.assignee?.type === "agent" ? issue.assignee.id : undefined),
+                        },
                       }),
                     );
                     onClose();
                   }}
                   className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[11.5px] font-semibold text-white bg-[var(--color-brand)] hover:opacity-90 cursor-pointer hm-soft"
-                  title="Set up agents (if needed), spawn the task's agent in its workspace, and tell it to work on this issue"
+                  title="Choose an agent + workspace, then spawn it to work on this issue"
                 >
                   <Play size={11} fill="currentColor" strokeWidth={0} aria-hidden />
                   Work on this
@@ -201,18 +260,80 @@ export function IssuePeek({ root, id, onClose }: Props) {
                     onChange={(s) => root && update.mutate({ root, id: issue.id, state: s, note: "set from peek" })}
                   />
                 </PropRow>
+                <PropRow label="Agents">
+                  <IssueAgents issueId={issue.id} root={root} />
+                </PropRow>
+                <PropRow label="Type">
+                  <select
+                    value={issue.type ?? ""}
+                    onChange={(e) =>
+                      root &&
+                      patch.mutate({
+                        root,
+                        id: issue.id,
+                        patch: { type: (e.target.value || null) as IssueType | null },
+                      })
+                    }
+                    className="w-full bg-[var(--color-bg)] border border-[var(--color-line2)] rounded-md px-2 py-1.5 text-[12px] text-[var(--color-fg)] outline-none focus:border-[var(--color-brand)]"
+                    aria-label="Issue type"
+                  >
+                    <option value="">— none —</option>
+                    {ISSUE_TYPE_OPTIONS.map((t) => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                </PropRow>
+                <PropRow label="Preferred agent">
+                  <select
+                    value={issue.preferredAgent ?? ""}
+                    onChange={(e) =>
+                      root &&
+                      patch.mutate({
+                        root,
+                        id: issue.id,
+                        patch: { preferredAgent: e.target.value || null },
+                      })
+                    }
+                    className="w-full bg-[var(--color-bg)] border border-[var(--color-line2)] rounded-md px-2 py-1.5 text-[12px] text-[var(--color-fg)] outline-none focus:border-[var(--color-brand)]"
+                    aria-label="Preferred agent"
+                    title="Default agent to run when you click Work on this issue"
+                  >
+                    <option value="">Default (ask each time)</option>
+                    {WORK_AGENTS.map((a) => (
+                      <option key={a.id} value={a.id}>{a.label}</option>
+                    ))}
+                  </select>
+                </PropRow>
                 {syncConfig && root && (() => {
                   const link = (issue.sync ?? []).find((s) => s.provider === syncConfig.providerId);
                   const linked = !!link && link.externalId !== "__pending__";
                   return (
                     <PropRow label={`Remote board · ${syncConfig.providerId}`}>
-                      <RemoteStateRow
-                        linked={linked}
-                        remoteState={link?.remoteState}
-                        url={link?.url}
-                        pending={setRemoteState.isPending}
-                        onMove={(s) => setRemoteState.mutate({ root, id: issue.id, state: s })}
-                      />
+                      <div className="space-y-1.5">
+                        <RemoteStateRow
+                          linked={linked}
+                          remoteState={link?.remoteState}
+                          url={link?.url}
+                          pending={setRemoteState.isPending}
+                          onMove={(s) => setRemoteState.mutate({ root, id: issue.id, state: s })}
+                        />
+                        {/* Manual push/pull: pull latest from the tracker then push
+                            my local edits (fields + comments). Board-scoped sync —
+                            reconciles this issue along with the rest. */}
+                        <button
+                          onClick={() =>
+                            runSync.mutate(
+                              { root },
+                              { onSuccess: () => qc.invalidateQueries({ queryKey: ["issue", root, issue.id] }) },
+                            )
+                          }
+                          disabled={runSync.isPending}
+                          className="w-full inline-flex items-center justify-center gap-1.5 h-7 px-2 rounded-md border border-[var(--color-line2)] text-[11.5px] font-medium text-[var(--color-fg2)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                          title="Pull latest from the tracker, then push my local edits and comments"
+                        >
+                          {runSync.isPending ? "Syncing…" : "↻ Sync to Azure"}
+                        </button>
+                      </div>
                     </PropRow>
                   );
                 })()}

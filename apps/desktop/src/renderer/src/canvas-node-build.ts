@@ -57,14 +57,6 @@ export interface NodeBuildCtx {
   onNodeResizeCommit: (id: string, w: number, h: number, x?: number, y?: number) => void;
   renameTile: (id: string, name: string) => void;
   setAgentTitle: (id: string, title: string) => void;
-  /** Open the create/edit modal for a Command Button tile. */
-  editCmdButton: (id: string) => void;
-  /** Open the create/edit modal for a Trigger tile. */
-  editTrigger: (id: string) => void;
-  /** Fire a trigger's workflow chain now (manual override, always available). */
-  runTrigger: (id: string) => void;
-  /** Per-trigger last-run status, read by the tile for its status line. */
-  triggerRuns: Record<string, { status: "idle" | "running" | "done" | "error"; note?: string }>;
   /** Toggle a tile's pinned state. `rect` is the tile's SCREEN rect (top-left +
    *  size) captured from its DOM at click time (ignored when unpinning). */
   onTogglePin: (id: string, rect: { sx: number; sy: number; w: number; h: number }) => void;
@@ -79,7 +71,6 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
     updateFrameTitle, updateFrameColor, deleteFrame, arrangeFrame, bringFrameToFront,
     onAttachWorktree, onCreateWorktree, unbindBranch, bindWorkspace, unbindWorkspace,
     openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, onNodeResizeCommit, renameTile, setAgentTitle,
-    editCmdButton, editTrigger, runTrigger, triggerRuns,
     onTogglePin, onPinChange,
   } = ctx;
 
@@ -332,47 +323,6 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
         data: { root, onResize: onNodeResizeCommit, onClose: () => closeTile(t.id) },
         dragHandle: ".tile-drag-handle",
       };
-    } else if (t.kind === "cmdButton") {
-      // A background script runner button. cwd = explicit override, else the
-      // effective zone repo (frame/workspace folder), else the canvas cwd. The
-      // NAME comes from the user rename (tileNames) or the tile label. The run
-      // STATE is main-process runtime (streamed to the tile), not baked here.
-      node = {
-        id: t.id,
-        type: "cmdButton",
-        style: sized(t.id, w, h),
-        data: {
-          tileId: t.id,
-          name: tileNames[t.id] ?? t.label,
-          script: t.cmdButton?.script ?? "",
-          cwd: t.cmdButton?.cwd ?? effRepo ?? cwd ?? null,
-          onEdit: () => editCmdButton(t.id),
-          onResize: onNodeResizeCommit,
-          onClose: () => closeTile(t.id),
-        },
-        dragHandle: ".tile-drag-handle",
-      };
-    } else if (t.kind === "trigger") {
-      // Workflow entry point. mode/schedule config is the tile's own persisted
-      // `trigger` payload; run STATE (like cmdButton) is NOT baked here — it's
-      // owned by the workflow engine (Canvas's `triggerRuns`, keyed by tile id).
-      node = {
-        id: t.id,
-        type: "trigger",
-        style: sized(t.id, w, h),
-        data: {
-          tileId: t.id,
-          name: tileNames[t.id] ?? t.label,
-          mode: t.trigger?.mode ?? "manual",
-          everyMs: t.trigger?.everyMs,
-          run: triggerRuns[t.id] ?? { status: "idle" as const },
-          onRun: () => runTrigger(t.id),
-          onEdit: () => editTrigger(t.id),
-          onResize: onNodeResizeCommit,
-          onClose: () => closeTile(t.id),
-        },
-        dragHandle: ".tile-drag-handle",
-      };
     } else if (t.kind === "browser") {
       // No repo needed — a browser tile is repo-agnostic.
       node = {
@@ -421,9 +371,6 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
           cwd,
           cmd,
           args,
-          // Workflow-connectable only for a recognized agent CLI — a plain
-          // shell has no "turn" concept for agent.send/agent.read to await.
-          isAgent: identifyAgent(cmd) != null,
           label: t.label,
           // NOTE: the live agent OSC title is deliberately NOT used here. It
           // updates ~every 600ms while an agent streams; feeding it into node data
@@ -432,6 +379,7 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
           // title still shows in the Layers panel (its own memo) and the terminal
           // status line; tiles show the rename / auto name.
           name: tileNames[t.id] ?? autoNameFromCmd(cmd),
+          issueId: t.issueId,
           onRename: renameTile,
           onAgentTitle: setAgentTitle,
           onOpenInBrowser: (url: string) => openUrlInBrowser(t.id, url),

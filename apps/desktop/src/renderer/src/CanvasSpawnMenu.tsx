@@ -11,7 +11,7 @@
  */
 import { createPortal } from "react-dom";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { FilePlus2, SquareTerminal, Zap } from "lucide-react";
+import { FilePlus2 } from "lucide-react";
 import { OPEN_KINDS } from "./spawn-icons";
 import { AGENTS, AgentIcon } from "./agents";
 
@@ -34,10 +34,6 @@ interface Props {
   onSpawnKind: (kind: string, frameId: string | null) => void;
   /** Open the single-file picker (spawns a file tile on pick). */
   onSpawnFile: (frameId: string | null) => void;
-  /** Create a command-button tile (opens its config modal). */
-  onSpawnCommand: (frameId: string | null) => void;
-  /** Create a trigger tile — the start of a workflow (opens its config modal). */
-  onSpawnTrigger: (frameId: string | null) => void;
 }
 
 function Section({ label }: { label: string }) {
@@ -60,7 +56,7 @@ function Item({ icon, label, onClick }: { icon: ReactNode; label: string; onClic
   );
 }
 
-export function CanvasSpawnMenu({ menu, onClose, onSpawnAgent, onSpawnKind, onSpawnFile, onSpawnCommand, onSpawnTrigger }: Props) {
+export function CanvasSpawnMenu({ menu, onClose, onSpawnAgent, onSpawnKind, onSpawnFile }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ x: menu.x, y: menu.y });
 
@@ -131,16 +127,6 @@ export function CanvasSpawnMenu({ menu, onClose, onSpawnAgent, onSpawnKind, onSp
           icon={<FilePlus2 size={14} />}
           label="File…"
           onClick={pick(() => onSpawnFile(fid))}
-        />
-        <Item
-          icon={<SquareTerminal size={14} />}
-          label="Command button"
-          onClick={pick(() => onSpawnCommand(fid))}
-        />
-        <Item
-          icon={<Zap size={14} />}
-          label="Trigger"
-          onClick={pick(() => onSpawnTrigger(fid))}
         />
       </div>
     </>,
