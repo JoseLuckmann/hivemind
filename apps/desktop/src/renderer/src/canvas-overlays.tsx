@@ -302,26 +302,10 @@ export function CanvasEmptyState({
           <kbd className="font-mono text-[10px] text-[var(--color-fg3)] group-hover:text-[var(--color-fg2)] transition-colors shrink-0">⌘\</kbd>
         </button>
 
-        {/* With a project open but no .hivemind/, surface init right next to the
-            primary action (the empty-state path the removed top-left switcher
-            used to own; the ⌘K palette has the same item too). */}
-        {!noProject && onInitWorkspace && (
-          <button
-            onClick={onInitWorkspace}
-            className="mt-2 w-full flex items-center gap-3 rounded-lg border border-[var(--color-line2)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg3)] transition-colors px-3.5 py-2.5 text-left group"
-          >
-            <span aria-hidden className="grid place-items-center size-7 shrink-0 rounded-md bg-[var(--color-bg3)] text-[var(--color-warn)] group-hover:bg-[var(--color-brand)] group-hover:text-white transition-colors">
-              <FolderPlus size={14} />
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-[12.5px] font-medium text-[var(--color-fg)]">Initialize workspace here…</span>
-              <span className="block text-[11px] text-[var(--color-fg3)] leading-snug">Creates a .hivemind/ so issues + agents can run</span>
-            </span>
-          </button>
-        )}
-
-        {/* Secondary: quiet horizontal rule of links */}
-        <div className="mt-3 flex items-center gap-1">
+        {/* Secondary: quiet horizontal rule of links. When a project is open but
+            has no .hivemind/ of its own, "Initialize here" lives here as a
+            discreet link (not a loud full-width button) — findable, not shouty. */}
+        <div className="mt-3 flex items-center gap-1 flex-wrap">
           {secondary.map((s) => (
             <button
               key={s.label}
@@ -338,6 +322,16 @@ export function CanvasEmptyState({
               <kbd className="font-mono text-[9.5px] text-[var(--color-fg3)]">{s.hint}</kbd>
             </button>
           ))}
+          {!noProject && onInitWorkspace && (
+            <button
+              onClick={onInitWorkspace}
+              title="Create a .hivemind/ in this folder so issues + agents can run here"
+              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11.5px] text-[var(--color-fg2)] hover:bg-[var(--color-bg3)] hover:text-[var(--color-fg)] transition-colors"
+            >
+              <FolderPlus size={12} className="text-[var(--color-fg3)]" aria-hidden />
+              Initialize here
+            </button>
+          )}
         </div>
       </div>
     </div>

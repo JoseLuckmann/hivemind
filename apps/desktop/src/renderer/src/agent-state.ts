@@ -73,6 +73,20 @@ export function identifyAgent(cmd: string): Agent | null {
   return ALIASES[base] ?? null;
 }
 
+/** Agents whose provider (`main/providers/*.ts`) injects deterministic
+ *  turn/status hooks — see docs/agent-status-signals.md. Everything else
+ *  (codex, kiro, gemini, cursor, …) is scrape-only: `TurnTracker.waitForTurn`
+ *  never resolves for them (no Stop-hook event ever arrives), so anything
+ *  that needs a precise "turn finished, here's the clean reply" signal —
+ *  `agent.read`, and by extension the canvas workflow engine's `deliverStep`
+ *  — must fall back to a best-effort status-bus idle transition for these
+ *  (see `agent-status-bus.ts`'s `waitForIdle`). Keep in sync with
+ *  `main/providers/registry.ts` — a provider only belongs here once its
+ *  `resume()` actually injects the Stop-hook-equivalent signal (droid/pi
+ *  wire it via their own mechanisms; codex/kiro explicitly document that
+ *  they don't). */
+export const HOOK_CAPABLE_AGENTS: ReadonlySet<Agent> = new Set(["claude", "droid", "pi"]);
+
 // --- shared helpers (ported from detect.rs) -------------------------------
 
 const BRAILLE = /[⠀-⣿]/;

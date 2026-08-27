@@ -12,6 +12,8 @@ import {
   setTurnState,
   statusOf,
   noteOutput,
+  waitForIdle,
+  revalidate,
 } from "../../src/renderer/src/agent-status-bus.ts";
 
 test("subscribers receive published events", () => {
@@ -268,4 +270,48 @@ test("staleness gate is inert until the tile has produced output at least once",
   setTurnState("st4", "working");
   assert.equal(statusOf("st4"), "working");
   clearStatus("st4");
+});
+
+// waitForIdle — the canvas workflow engine's hookless-agent (codex/kiro) fallback.
+test("waitForIdle resolves true on a real working→idle transition", async () => {
+  clearStatus("wf1");
+  const p = waitForIdle("wf1", { timeoutMs: 5000 });
+  publishStatus({ tileId: "wf1", label: "codex", status: "working" });
+  publishStatus({ tileId: "wf1", label: "codex", status: "idle" });
+  assert.equal(await p, true);
+  clearStatus("wf1");
+});
+
+test("waitForIdle ignores the pre-existing resting idle replayed on subscribe", async () => {
+  clearStatus("wf2");
+  publishStatus({ tileId: "wf2", label: "codex", status: "idle" }); // resting state, BEFORE the call
+  const p = waitForIdle("wf2", { timeoutMs: 200, minElapsedMs: 5000 });
+  // No new transition ever arrives — must NOT resolve true off the stale replay.
+  assert.equal(await p, false);
+  clearStatus("wf2");
+});
+
+test("waitForIdle accepts an idle with no observed working blip once minElapsedMs has passed (coarse poll)", async () => {
+  clearStatus("wf3");
+  const p = waitForIdle("wf3", { timeoutMs: 2000, minElapsedMs: 30 });
+  await new Promise((r) => setTimeout(r, 40));
+  publishStatus({ tileId: "wf3", label: "codex", status: "idle" }); // no "working" event ever seen
+  assert.equal(await p, true);
+  clearStatus("wf3");
+});
+
+test("waitForIdle never resolves true on a SYNTHETIC (staleness-decayed) idle", async () => {
+  clearStatus("wf4");
+  publishStatus({ tileId: "wf4", label: "codex", status: "working" });
+  noteOutput("wf4", Date.now() - 16000); // stale → synthetic idle on the next flush
+  const p = waitForIdle("wf4", { timeoutMs: 150 });
+  revalidate("wf4"); // force the staleness re-evaluation the poll would trigger
+  assert.equal(await p, false);
+  clearStatus("wf4");
+});
+
+test("waitForIdle resolves false on timeout with no transition at all", async () => {
+  clearStatus("wf5");
+  assert.equal(await waitForIdle("wf5", { timeoutMs: 50 }), false);
+  clearStatus("wf5");
 });

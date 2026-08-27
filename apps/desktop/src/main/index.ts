@@ -68,6 +68,9 @@ import {
 import { unwatchAll, watchRepo } from "./fs-watcher.js";
 import { registerAgentNotifications } from "./agent-notify.js";
 import { getNotificationSettings, setNotificationSettings } from "./notification-settings-store.js";
+import {
+  runCmd, stopCmd, resetCmd, getCmdState, getCmdOutput, disposeCmd, killAllCmds, setCmdStateEmitter,
+} from "./command-runner.js";
 import { normalizeNotificationSettings } from "../shared/notification-settings.js";
 import type { AppErrorEvent } from "../shared/ipc.js";
 import { startPlanBridge, type PlanRequest } from "./plan-bridge.js";
@@ -82,6 +85,7 @@ import { SubagentReaper } from "./hcp/subagent-reaper.js";
 import { notifyStatusFor } from "./hcp/notification-map.js";
 import { OutputRecorder } from "./hcp/output-recorder.js";
 import { readOrCreateToken, hcpSockPath } from "./hcp/token.js";
+import { ensureClaudeTrust } from "./claude-trust.js";
 import { HcpError } from "./hcp/protocol.js";
 import { PipeManager } from "./hcp/pipes.js";
 import { readLastAssistantMessage } from "./hcp/transcript.js";
@@ -100,9 +104,31 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // .desktop StartupWMClass matches "electron". (Packaged AppImage already gets
 // this from electron-builder's executableName, but setting it is harmless there.)
 app.setName("hivemind");
-// Dev runs on a SEPARATE profile (~/.config/hivemind-dev) so `pnpm start`/`pnpm
-// dev` never touch the installed AppImage's canvas, and both can run at once.
-if (!app.isPackaged) app.setName("hivemind-dev");
+// Dev runs on a SEPARATE profile so `pnpm start`/`pnpm dev` never touch the
+// installed AppImage's canvas, and both can run at once. CRUCIALLY, each
+// worktree/checkout gets its OWN dev profile so running `make run` in one
+// worktree can't corrupt or share state (sessions, the detached pty-daemon,
+// HCP socket/token, localStorage layout) with the production install OR with a
+// different worktree. Everything downstream — daemon socket, hcp socket, token,
+// sessions/, localStorage — derives from app.getPath("userData"), which derives
+// from this name, so renaming here isolates the whole profile in one place.
+//
+// The suffix is a stable short hash of the app's install path (unique per
+// worktree, identical across runs of the SAME worktree so its sessions persist).
+// `HIVEMIND_PROFILE` overrides it with an explicit name when you want a named or
+// shared dev profile (e.g. CI, or reproducing a bug against a specific profile).
+if (!app.isPackaged) {
+  const explicit = process.env.HIVEMIND_PROFILE?.trim();
+  if (explicit) {
+    app.setName(`hivemind-dev-${explicit.replace(/[^A-Za-z0-9._-]/g, "-")}`);
+  } else {
+    // getAppPath() → the worktree's app dir; hash it so two worktrees at
+    // different paths never collide, while the same worktree stays stable.
+    const worktreeKey = (() => { try { return app.getAppPath(); } catch { return __dirname; } })();
+    const suffix = createHash("sha256").update(worktreeKey).digest("hex").slice(0, 10);
+    app.setName(`hivemind-dev-${suffix}`);
+  }
+}
 
 // Renaming the app (above) moves the userData dir to ~/.config/hivemind. Without
 // this, EVERY existing user loses their canvas (frames/tiles/layout live in the
@@ -153,7 +179,11 @@ function migrateLegacyProfile(): void {
     console.warn("hivemind: legacy profile migration skipped:", (e as Error).message);
   }
 }
-migrateLegacyProfile();
+// Only the PACKAGED app migrates a legacy profile (the rename-on-upgrade path
+// above). Dev profiles are per-worktree and intentionally start empty — cloning
+// a legacy/production profile into every new worktree would defeat the isolation
+// (and could re-import the very stale sessions we're keeping out).
+if (app.isPackaged) migrateLegacyProfile();
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -1218,6 +1248,15 @@ const hcpMailbox = new Mailbox(hcpWriteToTile, SUBMIT_DELAY_MS);
 // before that line only in response to an actual pty exit, by which point it's set;
 // the no-op default guards the impossible early-fire.
 let hcpForgetTile: (tileId: string) => void = () => {};
+// Same lazy-hoist pattern as hcpForgetTile above, wired in startHcpControlPlane().
+// Lets the RENDERER call HCP verbs (agent.send/agent.read/tile.connect/…)
+// directly — the canvas workflow engine's only new main-process primitive.
+// Everything the verb does (Mailbox delivery, TurnTracker, depth/rate gates)
+// is exactly what the unix-socket MCP server already exercises; this just
+// exposes the same `dispatch` to an in-process caller.
+let hcpDispatch: (method: string, params: unknown) => Promise<unknown> = async () => {
+  throw new Error("hcp control plane not ready");
+};
 // The ONE teardown path for a tile whose pty has exited (crash, kill, or a
 // tile.close that killed it). Both the local and remote onExit handlers funnel
 // through here so no teardown path leaks HCP state — previously only the
@@ -1266,6 +1305,16 @@ ipcMain.handle("ptySpawn", wrap(async (e, opts: Parameters<typeof spawnPty>[0]) 
   if (opts.cwd) {
     const st = await fsp.stat(opts.cwd).catch(() => null);
     if (!st?.isDirectory()) throw new Error(`pty cwd is not a directory: ${opts.cwd}`);
+  }
+  // Pre-accept claude's per-directory workspace-trust dialog for this cwd.
+  // Without this, a `claude` spawned in a folder it hasn't seen opens to a
+  // blocking "Do you trust this folder?" screen and never reaches its prompt —
+  // the tile sits "working" forever (codex has no such screen, which is why
+  // codex tiles worked and claude tiles hung). The user consented by opening
+  // this repo in hivemind and spawning an agent here; record it the same way
+  // clicking "Yes" would. Best-effort + idempotent; local claude only.
+  if (opts.cwd && (opts.cmd ?? "").split("/").pop() === "claude") {
+    ensureClaudeTrust(opts.cwd);
   }
   // Ensure the user's PATH/tokens are patched into process.env BEFORE the PTY
   // (or, in daemon mode, the daemon process that inherits this env) spawns —
@@ -1688,6 +1737,28 @@ ipcMain.handle(
     else p.reject(new HcpError("INTERNAL", errorMessage || "renderer verb failed"));
   }),
 );
+
+// ── Command Button tile ───────────────────────────────────────────
+// Wire the runner's state emitter to the live window (channel per tile). Set
+// once here; the runner module stays electron-free (mirrors agent-notify-core).
+setCmdStateEmitter((tileId, state) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(`cmd:state:${tileId}`, state);
+  }
+});
+ipcMain.handle("cmd:run", wrap(async (_e, tileId: string, script: string, cwd?: string) =>
+  runCmd(tileId, script, cwd)));
+ipcMain.handle("cmd:getState", wrap(async (_e, tileId: string) => getCmdState(tileId)));
+ipcMain.handle("cmd:getOutput", wrap(async (_e, tileId: string) => getCmdOutput(tileId)));
+ipcMain.on("cmd:stop", (_e, tileId: string) => stopCmd(tileId));
+ipcMain.on("cmd:reset", (_e, tileId: string) => resetCmd(tileId));
+ipcMain.on("cmd:dispose", (_e, tileId: string) => disposeCmd(tileId));
+// Renderer → HCP dispatch (the mirror of hcp:command/hcp:result, which only
+// ever goes main→renderer). Generic on the wire: any verb dispatch() knows —
+// agent.send, agent.read, tile.connect, … — reachable without a socket/MCP
+// hop. See the hcpDispatch hoist above for why this is safe before the
+// control plane has started (throws a clear error instead of hanging).
+ipcMain.handle("hcp:invoke", wrap(async (_e, method: string, params?: unknown) => hcpDispatch(method, params)));
 // Anti-fork-bomb: at most 16 HCP agent spawns per rolling minute.
 let hcpSpawnTimes: number[] = [];
 function hcpSpawnAllowed(): boolean {
@@ -1710,6 +1781,7 @@ function startHcpControlPlane(): void {
     callRenderer: hcpCallRenderer,
     writeToTile: hcpWriteToTile,
     deliverToTile: (ptyId, text, onSent) => hcpMailbox.deliver(ptyId, text, onSent),
+    isAlive: (tileId) => hasRemotePty(tileId) || hasSession(tileId),
     turns: hcpTurns,
     recorder: hcpRecorder,
     spawnAllowed: hcpSpawnAllowed,
@@ -1724,6 +1796,7 @@ function startHcpControlPlane(): void {
   });
   const dispatch = _hcp.dispatch;
   hcpForgetTile = _hcp.forgetTile; // wire the pty-exit teardown to the dispatch's per-tile cleanup
+  hcpDispatch = dispatch; // let hcp:invoke (renderer-initiated calls) reach the same dispatch
   const server = startHcpServer(hcpSockPath(userData), {
     token,
     rendererUp: () => !!mainWindow && !mainWindow.isDestroyed(),
@@ -1857,6 +1930,13 @@ function forceExitAfterFlush(): void {
   } catch {
     /* best-effort */
   }
+  // Command-Button scripts are NOT persistent (unlike PTY sessions) — reap them
+  // so a deploy/build launched from a button doesn't outlive the app unseen.
+  try {
+    killAllCmds();
+  } catch {
+    /* best-effort */
+  }
   try {
     session.defaultSession.flushStorageData();
   } catch {
@@ -1886,6 +1966,11 @@ app.on("before-quit", () => {
   }
   try {
     killAllPtys();
+  } catch {
+    /* best-effort */
+  }
+  try {
+    killAllCmds();
   } catch {
     /* best-effort */
   }

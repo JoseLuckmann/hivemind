@@ -15,7 +15,7 @@ import { subscribeStatus, type TileStatusKind } from "./agent-status-bus";
 import { AgentIcon } from "./agents";
 import { FrameRailMenu, type FrameActions } from "./FrameRailMenu";
 
-export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file" | "explorer";
+export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file" | "explorer" | "cmdButton" | "trigger";
 
 export interface LayerTile {
   id: string;
@@ -98,6 +98,8 @@ const KIND_GLYPH: Record<LayerKind, string> = {
   planReview: "▤",
   workbench: "▥",
   file: "≡",
+  cmdButton: "▶",
+  trigger: "⚡",
   // Rendered via the Folder lucide icon below (same reasoning as browser).
   explorer: "",
 };

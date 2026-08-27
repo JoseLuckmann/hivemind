@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { HiveIpc, DiffScope, WorktreeCreateOpts, PlanReviewOpen, HcpCommand, HcpPipeEvent, HcpSpawnEvent, HcpWaitEvent, HcpSubagentEvent, HcpNotifyEvent, HcpTurnStateEvent, AppErrorEvent } from "../shared/ipc.js";
+import type { HiveIpc, DiffScope, WorktreeCreateOpts, PlanReviewOpen, HcpCommand, HcpPipeEvent, HcpSpawnEvent, HcpWaitEvent, HcpSubagentEvent, HcpNotifyEvent, HcpTurnStateEvent, AppErrorEvent, CmdButtonState } from "../shared/ipc.js";
 
 const api: HiveIpc & {
   /** Resolve a picked File's real filesystem path (for the persistent video wallpaper). */
@@ -36,6 +36,7 @@ const api: HiveIpc & {
   onHcpNotify: (cb: (e: HcpNotifyEvent) => void) => () => void;
   onHcpTurnState: (cb: (e: HcpTurnStateEvent) => void) => () => void;
   onAppError: (cb: (e: AppErrorEvent) => void) => () => void;
+  onCmdState: (tileId: string, cb: (state: CmdButtonState) => void) => () => void;
 } = {
   resolveProject: (rootHint) => ipcRenderer.invoke("resolveProject", rootHint),
   pickProjectFolder: () => ipcRenderer.invoke("pickProjectFolder"),
@@ -213,6 +214,23 @@ const api: HiveIpc & {
   // HCP control plane: main pushes a canvas verb → renderer executes → replies.
   hcpResult: (id, ok, result, errorMessage) =>
     ipcRenderer.invoke("hcp:result", id, ok, result, errorMessage),
+  // HCP control plane, the other direction: renderer calls a verb directly
+  // (e.g. agent.send/agent.read for the workflow engine) → main's `dispatch`.
+  hcpInvoke: (method, params) => ipcRenderer.invoke("hcp:invoke", method, params),
+
+  // Command Button: run a saved bash script in the background + track state.
+  cmdRun: (tileId, script, cwd) => ipcRenderer.invoke("cmd:run", tileId, script, cwd),
+  cmdStop: (tileId) => ipcRenderer.send("cmd:stop", tileId),
+  cmdReset: (tileId) => ipcRenderer.send("cmd:reset", tileId),
+  cmdGetState: (tileId) => ipcRenderer.invoke("cmd:getState", tileId),
+  cmdGetOutput: (tileId) => ipcRenderer.invoke("cmd:getOutput", tileId),
+  cmdDispose: (tileId) => ipcRenderer.send("cmd:dispose", tileId),
+  onCmdState: (tileId, cb) => {
+    const ch = `cmd:state:${tileId}`;
+    const listener = (_e: unknown, state: CmdButtonState) => cb(state);
+    ipcRenderer.on(ch, listener);
+    return () => ipcRenderer.removeListener(ch, listener);
+  },
   onHcpCommand: (cb: (cmd: HcpCommand) => void) => {
     const listener = (_e: unknown, cmd: HcpCommand) => cb(cmd);
     ipcRenderer.on("hcp:command", listener);

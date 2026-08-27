@@ -52,6 +52,40 @@ export interface TileInstance {
    *  routes the decision to the plan-bridge hook; `hcpCmdId` routes it to a
    *  blocked HCP `review.open` caller instead (one or the other is set). */
   review?: { requestId?: string; plan: string; cwd: string; hcpCmdId?: string; agentTileId?: string };
+  /** cmdButton only — the saved bash script this button runs (in the background,
+   *  no terminal) + an optional cwd override. Persisted so the button + its
+   *  command round-trip with the layout, exactly like a browser tile's `url` or a
+   *  file tile's `file`. The button's NAME rides on the usual tile label /
+   *  tileNames map. The runner STATE (idle/running/…) is NOT persisted — it's
+   *  main-process runtime, re-read via cmdGetState on (re)mount. */
+  cmdButton?: { script: string; cwd?: string };
+  /** trigger only — how this workflow-run starts. `manual` only ever fires via
+   *  the tile's own "Run now" button; `schedule` also self-fires every
+   *  `everyMs` (armed by workflow-scheduler.ts). Event triggers are future
+   *  work — see docs/canvas-workflows.md. */
+  trigger?: { mode: "manual" | "schedule"; everyMs?: number };
+}
+
+/** A user-drawn connection between two workflow-participable tiles (trigger →
+ *  agent, agent → agent, agent → cmdButton). Distinct from the ephemeral
+ *  `dataflow`/`spawn` edges in canvas-pipe-edge.tsx (those are computed from
+ *  live HCP state, never persisted); a WorkflowEdge is authored by the user
+ *  via a connect-drag and carries the prompt that step delivers. `source`/
+ *  `target` are tile ids — the SAME ids as the tiles on the canvas, since a
+ *  workflow step runs against the real, already-spawned tile, not a template.
+ *  See docs/canvas-workflows.md for the execution model. */
+export interface WorkflowEdge {
+  id: string;
+  source: string;
+  target: string;
+  /** Unset only momentarily, between a fresh connect-drag and the prompt
+   *  popover's first save. Empty into a cmdButton target is normal (an action
+   *  step has no prompt — the edge just triggers "run now"). */
+  prompt?: string;
+  /** When the source is an agent step (not the trigger), prefix the delivered
+   *  message with that step's last reply. Default true when applicable — the
+   *  v1 answer to cross-agent "memory sharing". */
+  includePrevReply?: boolean;
 }
 
 export interface FrameState {
@@ -111,11 +145,15 @@ export interface PersistedLayout {
   /** Last viewport position so reopen drops user back where they were instead
    *  of resetting to (16, 24, zoom=1). */
   viewport?: { x: number; y: number; zoom: number };
+  /** User-authored workflow graph edges (trigger→agent, agent→agent,
+   *  agent→cmdButton). Additive field — absent on any layout saved before
+   *  this feature; defaults to `[]` on load, same as `frames`/`positions`. */
+  workflowEdges?: WorkflowEdge[];
 }
 
 /** The fields a save snapshot must supply (everything round-tripped). */
 export type LayoutSnapshot = Required<
-  Pick<PersistedLayout, "sizes" | "positions" | "frames" | "tileNames" | "tiles" | "editorTabs" | "frameOf">
+  Pick<PersistedLayout, "sizes" | "positions" | "frames" | "tileNames" | "tiles" | "editorTabs" | "frameOf" | "workflowEdges">
 > & { viewport: PersistedLayout["viewport"] };
 
 export const LAYOUT_KEY = (repoPath: string | null) =>
@@ -213,6 +251,7 @@ export function loadLayout(repoPath: string | null): PersistedLayout {
       tileNames: p.tileNames ?? {},
       tiles,
       editorTabs,
+      workflowEdges: Array.isArray(p.workflowEdges) ? p.workflowEdges : [],
       viewport: p.viewport && typeof p.viewport.x === "number" && typeof p.viewport.y === "number"
         ? { x: p.viewport.x, y: p.viewport.y, zoom: Number(p.viewport.zoom) || 1 }
         : undefined,

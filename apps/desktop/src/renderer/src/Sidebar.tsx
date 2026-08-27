@@ -7,6 +7,9 @@ export type SidebarScope = { kind: "all" };
 interface Props {
   root: string | null;
   cwd: string;
+  /** Whether the OPENED folder has its own `.hivemind/` (not an inherited
+   *  ancestor root). Gates the "Initialize here" item; falls back to !!root. */
+  openedFolderInitialized?: boolean;
   issues: IssueSummary[];
   scope: SidebarScope;
   onScope: (s: SidebarScope) => void;
@@ -22,6 +25,7 @@ interface Props {
 export function Sidebar({
   root,
   cwd,
+  openedFolderInitialized,
   issues,
   scope,
   onScope,
@@ -37,6 +41,9 @@ export function Sidebar({
   const [switcherOpen, setSwitcherOpen] = useState(false);
 
   const hasWorkspace = !!root;
+  // Prefer the explicit "this folder is initialized" signal; fall back to
+  // "any workspace resolved" for callers that don't pass it.
+  const folderInitialized = openedFolderInitialized ?? hasWorkspace;
   const projName = root ? root.split("/").slice(-2, -1)[0] ?? "project" : "No workspace";
   const repoPath = root ?? cwd;
   const otherRecents = recents.filter((p) => p !== repoPath).slice(0, 6);
@@ -82,7 +89,7 @@ export function Sidebar({
                 <span className="flex-1">Open folder…</span>
                 <kbd className="font-mono text-[10.5px] text-[var(--color-fg2)]">⌃O</kbd>
               </button>
-              {!hasWorkspace && (
+              {!folderInitialized && (
                 <button
                   onClick={() => { setSwitcherOpen(false); onInitWorkspace(); }}
                   className="w-full text-left flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-[var(--color-brand)] hover:bg-[var(--color-bg4)] transition-colors cursor-pointer"

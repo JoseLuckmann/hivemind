@@ -3,6 +3,13 @@
 > Status: design. Target: a `hive_workflow` MCP tool + a `hive-workflow` skill that
 > let an agent run multi-agent workflows on the canvas, using hive's own control
 > plane instead of Claude Code's built-in `Workflow` tool.
+>
+> Companion: [`canvas-workflows.md`](./canvas-workflows.md) covers the
+> **user-drawn** counterpart (shipped) — a person wiring trigger→agent→agent→
+> action directly on the canvas, rather than an agent calling this tool from
+> inside a session. Both reuse the same underlying primitives (`doSpawn`,
+> `agent.send`/`agent.read`, `TurnTracker`, the Mailbox); they differ only in
+> who authors the graph and where it's persisted.
 
 ## Goal
 

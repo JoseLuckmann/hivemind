@@ -247,6 +247,15 @@ export function useSpawn(ctx: SpawnCtx) {
         label = `shell #${n}`;
       } else if (kind === "browser") {
         label = `Browser #${n}`;
+      } else if (kind === "cmdButton") {
+        // A command button is named by the user in the create modal; use a
+        // neutral placeholder until they set it (Canvas opens the modal right
+        // after spawn and renames via tileNames).
+        label = "Command";
+      } else if (kind === "trigger") {
+        // Same create-then-rename dance as cmdButton — Canvas opens the config
+        // modal right after spawn.
+        label = "Trigger";
       } else if (kind === "file") {
         // A single-file tile is named after its file (basename); the full
         // repo-relative path rides on the TileInstance below.

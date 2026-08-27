@@ -9,22 +9,8 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ### Added
 
-- **File Explorer tile.** A new standalone canvas tile (Open ▸ Explorer) for browsing any
-  folder — not just a frame's bound repo — with a live-updating OS-style icon grid on the
-  right and a folder tree on the left. "Change folder…" points it anywhere; new/changed/
-  removed files show up without a manual refresh (a dedicated `watchPath` watcher guarantees
-  the bound folder is live, even for a worktree/workspace zone the app wouldn't otherwise
-  watch). Double-click a file to open it with the OS default app; editing stays in the Editor
-  tile. Publishes file-count/last-event metadata via a new `explorer-status-bus` so other
-  canvas surfaces can consume an Explorer tile's live state.
-- The **File…** picker (a frame's Open menu) is now a real navigable folder tree (reusing the
-  Editor tile's file tree) instead of a flat search-only list.
-
-### Fixed
-
-- The frame header's "+ → Open in zone" menu and the Layers rail's "Open ▸" submenu each had
-  their `Terminal/Editor/Diff/Issues/Browser` entries listed twice (a leftover from an earlier
-  incomplete edit); both now render once, from the shared `OPEN_KINDS` list.
+- **Command Button tile** — a canvas button that runs a saved bash script in the background (no terminal), with glanceable lifecycle state (idle · running · done · error) shown as a status light + Run/Stop control. Create one from the top-center tool island (key `8`) or a frame's Open menu; name it, write a script, and optionally set a working directory. The command + cwd persist with the layout (per-repo); the run state is tracked in the main process and streamed live so it survives a window reload. Useful for one-click workflows like `make deploy stage=dev target=agentx-service` scoped to a workspace frame.
+- **Canvas workflows** — turn the canvas into a visual, user-drawn agent pipeline. Drop a **Trigger** tile (key `9`, manual or on a schedule), drag a connection to an agent tile to give it a prompt, chain further agent tiles (optionally priming each with the previous one's reply), and end at a Command Button to run a script. Firing the trigger walks the chain, deterministically waiting for each agent's turn to finish (hook-driven, not screen-scraped) before advancing. See `docs/canvas-workflows.md`.
 
 ## [1.16.0-flow.1] — 2026-08-26
 

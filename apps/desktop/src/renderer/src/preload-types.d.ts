@@ -1,4 +1,4 @@
-import type { HiveIpc, PlanReviewOpen, HcpCommand, HcpPipeEvent, HcpSpawnEvent, HcpWaitEvent, HcpSubagentEvent, HcpNotifyEvent, HcpTurnStateEvent, AppErrorEvent } from "../../shared/ipc";
+import type { HiveIpc, PlanReviewOpen, HcpCommand, HcpPipeEvent, HcpSpawnEvent, HcpWaitEvent, HcpSubagentEvent, HcpNotifyEvent, HcpTurnStateEvent, AppErrorEvent, CmdButtonState } from "../../shared/ipc";
 
 declare global {
   interface Window {
@@ -23,6 +23,8 @@ declare global {
       onHcpTurnState: (cb: (e: HcpTurnStateEvent) => void) => () => void;
       /** A background subsystem hit a non-fatal error → surface as a toast. */
       onAppError: (cb: (e: AppErrorEvent) => void) => () => void;
+      /** A Command Button's runner state changed → update the tile's visuals. */
+      onCmdState: (tileId: string, cb: (state: CmdButtonState) => void) => () => void;
       onPtyData: (tileId: string, cb: (data: string) => void) => () => void;
       onPtyExit: (
         tileId: string,
