@@ -10,6 +10,35 @@ export const IssueStateZ = z.enum([
 ]);
 export type IssueState = z.infer<typeof IssueStateZ>;
 
+/** Canonical issue TYPE — a hierarchy level / work kind, independent of the
+ *  Kanban `state`. Mirrors the Epic > Feature > (Story | Bug | Support | Spike |
+ *  Task) breakdown most trackers use. The hierarchy itself is expressed with
+ *  the existing `parent` field (a Story's parent is a Feature, a Feature's an
+ *  Epic); `type` just labels what each node IS so the UI can show the right
+ *  icon, the Parent picker can offer only valid parents, and sync can map
+ *  to/from the remote tracker's work item types (Azure "Epic"/"Feature"/
+ *  "User Story"/…). Leaf kinds: `story` is the generic work item; `bug` a
+ *  defect; `support` ("apoio") is work done to SUPPORT ANOTHER TEAM you don't
+ *  act on directly (cross-team assist); `spike` a time-boxed investigation;
+ *  `task` a plain to-do / sub-task. Ordered coarse→fine so a simple index
+ *  gives the hierarchy rank (see `ISSUE_TYPE_RANK`). */
+export const IssueTypeZ = z.enum(["epic", "feature", "story", "bug", "support", "spike", "task"]);
+export type IssueType = z.infer<typeof IssueTypeZ>;
+
+/** Hierarchy rank per type (lower = higher in the tree). Epics contain
+ *  Features; Features contain the leaf kinds. Leaves share a rank — a Bug and a
+ *  Story sit at the same level. Used to validate/suggest parents: a node may
+ *  only parent to a STRICTLY lower rank (a Story→Feature, a Feature→Epic). */
+export const ISSUE_TYPE_RANK: Record<IssueType, number> = {
+  epic: 0,
+  feature: 1,
+  story: 2,
+  bug: 2,
+  support: 2,
+  spike: 2,
+  task: 2,
+};
+
 export const AssigneeZ = z.object({
   type: z.enum(["agent", "member"]),
   id: z.string().min(1),
@@ -90,6 +119,15 @@ export const SyncLinkZ = z.object({
   remoteState: z.string().optional(),
   /** When this link was last successfully synced. */
   syncedAt: IsoZ.optional(),
+  /** Remote comment ids already mirrored INTO the local activity log — so a
+   *  re-sync doesn't append the same Azure comment twice. */
+  syncedCommentIds: z.array(z.string()).optional(),
+  /** Count of local, human/agent-authored activity entries already pushed OUT
+   *  to the remote as comments. Local activity is append-only, so "everything
+   *  after index N is new" is a cheap, stable high-water mark that survives
+   *  re-parsing without needing per-entry ids. Entries authored by the sync
+   *  actor itself (mirrored-in comments, field-sync notes) are never pushed. */
+  pushedCommentCount: z.number().int().nonnegative().optional(),
 });
 export type SyncLink = z.infer<typeof SyncLinkZ>;
 
@@ -105,9 +143,21 @@ export const IssueFrontmatterZ = z.object({
   id: IssueIdZ,
   title: z.string().min(1),
   state: IssueStateZ.default("backlog"),
+  // Canonical work-item type / hierarchy level. Optional-not-defaulted so
+  // existing issue files without the field stay valid and don't churn; read it
+  // as `issue.type ?? "task"`. A Story's parent is a Feature, a Feature's an
+  // Epic — the tree is `parent`, this labels each node.
+  type: IssueTypeZ.optional(),
   parent: z.string().nullable().default(null),
   labels: z.array(z.string()).default([]),
   assignee: AssigneeZ.nullable().default(null),
+  // Per-issue "Work on this" defaults, used to prefill the Work modal — NOT
+  // where the issue file lives (that's fixed by its workspace). `preferredFrame`
+  // is a canvas FRAME id the agent should spawn INTO (an issue can drive several
+  // agents in different frames/worktrees); `preferredAgent` is an agent id like
+  // "codex". Both optional; read as `issue.preferredFrame` / `.preferredAgent`.
+  preferredFrame: z.string().optional(),
+  preferredAgent: z.string().optional(),
   github: z.number().int().positive().nullable().default(null),
   // Cross-repo / soft links. Optional (not `.default([])`) so existing issue
   // literals and on-disk files without the field stay valid without churn;
@@ -163,9 +213,12 @@ export interface IssueSummary
     | "id"
     | "title"
     | "state"
+    | "type"
     | "parent"
     | "labels"
     | "assignee"
+    | "preferredFrame"
+    | "preferredAgent"
     | "github"
     | "sync"
     | "created"
@@ -181,9 +234,12 @@ export interface IssueSummary
 export type IssuePatch = Partial<{
   title: string;
   state: IssueSummary["state"];
+  type: IssueType | null;
   parent: string | null;
   labels: string[];
   assignee: Issue["assignee"];
+  preferredFrame: string | null;
+  preferredAgent: string | null;
   github: number | null;
   description: string;
   acceptanceCriteria: Issue["sections"]["acceptanceCriteria"];

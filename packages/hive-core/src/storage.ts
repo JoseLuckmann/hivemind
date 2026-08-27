@@ -28,6 +28,7 @@ import {
   type Issue,
   type IssuePatch,
   type IssueSections,
+  type IssueType,
   type SyncLink,
   type IssueSummary,
   PENDING_EXTERNAL_ID,
@@ -277,9 +278,12 @@ export function serializeIssue(issue: Issue): string {
     id: issue.id,
     title: issue.title,
     state: issue.state,
+    type: issue.type,
     parent: issue.parent,
     labels: issue.labels,
     assignee: issue.assignee,
+    preferredFrame: issue.preferredFrame,
+    preferredAgent: issue.preferredAgent,
     github: issue.github,
     links: issue.links,
     sync: issue.sync,
@@ -291,6 +295,11 @@ export function serializeIssue(issue: Issue): string {
   // vault on first save.
   if (!Array.isArray(fm.links) || fm.links.length === 0) delete fm.links;
   if (!Array.isArray(fm.sync) || fm.sync.length === 0) delete fm.sync;
+  // Same treatment for the optional-not-defaulted scalars — don't write a key
+  // at all when unset, so old files without them stay byte-stable on re-save.
+  if (fm.type === undefined) delete fm.type;
+  if (fm.preferredFrame === undefined) delete fm.preferredFrame;
+  if (fm.preferredAgent === undefined) delete fm.preferredAgent;
   const body = serializeSections(issue.sections);
   return matter.stringify(body, fm);
 }
@@ -343,9 +352,12 @@ export async function listIssues(root: string): Promise<IssueSummary[]> {
         id: d.id,
         title: d.title,
         state: d.state,
+        type: d.type,
         parent: d.parent,
         labels: d.labels,
         assignee: d.assignee,
+        preferredFrame: d.preferredFrame,
+        preferredAgent: d.preferredAgent,
         github: d.github,
         sync: d.sync,
         created: d.created,
@@ -535,9 +547,14 @@ import { SAMPLE_ISSUE_BODY } from "./templates.js";
 export interface CreateIssueOpts {
   title: string;
   state?: IssueSummary["state"];
+  /** Canonical work-item type (epic/feature/story/bug/support/task). */
+  type?: IssueType;
   parent?: string;
   labels?: string[];
   assignee?: Issue["assignee"];
+  /** Canvas frame id + agent id to prefill "Work on this" with. */
+  preferredFrame?: string;
+  preferredAgent?: string;
   description?: string;
   /** Structured acceptance criteria. Without this, agents cram the checklist
    *  into `description` as raw `- [ ]` lines and the dedicated panel is empty. */
@@ -570,9 +587,12 @@ export async function createIssue(root: string, opts: CreateIssueOpts): Promise<
     id: finalId,
     title: opts.title.trim() || "(untitled)",
     state: opts.state ?? "todo",
+    type: opts.type,
     parent: opts.parent ?? null,
     labels: opts.labels ?? [],
     assignee: opts.assignee ?? null,
+    preferredFrame: opts.preferredFrame,
+    preferredAgent: opts.preferredAgent,
     github: opts.github ?? null,
     created: now,
     updated: now,
@@ -678,6 +698,21 @@ export async function updateIssue(
   if (patch.github !== undefined && patch.github !== issue.github) {
     summary.push(`github: ${issue.github ?? "—"} → ${patch.github ?? "—"}`);
     issue.github = patch.github;
+  }
+  if (patch.type !== undefined) {
+    const next = patch.type ?? undefined;
+    if (next !== issue.type) {
+      summary.push(`type: ${issue.type ?? "—"} → ${next ?? "—"}`);
+      issue.type = next;
+    }
+  }
+  if (patch.preferredFrame !== undefined) {
+    const next = patch.preferredFrame ?? undefined;
+    if (next !== issue.preferredFrame) issue.preferredFrame = next;
+  }
+  if (patch.preferredAgent !== undefined) {
+    const next = patch.preferredAgent ?? undefined;
+    if (next !== issue.preferredAgent) issue.preferredAgent = next;
   }
   if (patch.description !== undefined) {
     issue.sections.description = patch.description;

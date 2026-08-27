@@ -10,7 +10,7 @@
  */
 import { z } from "zod";
 import type { Issue, IssueState } from "../types.js";
-import type { PushResult, RemoteItem, SyncProvider } from "./types.js";
+import type { PushResult, RemoteItem, RemoteTaxonomyNode, SyncProvider } from "./types.js";
 
 const API_VERSION = "7.1";
 
@@ -34,6 +34,10 @@ const AzureConfigZ = z.object({
   /** Override the default hivemind-state ↔ Azure-state-name mapping — Azure's
    *  actual state names depend on the org's process template. */
   stateMap: z.record(z.string(), z.string()).optional(),
+  /** Override the default hivemind-type ↔ Azure-work-item-type mapping (e.g.
+   *  { story: "Product Backlog Item" } for a Scrum process). Keys are hivemind
+   *  IssueType values; values are the org's Azure work item type names. */
+  typeMap: z.record(z.string(), z.string()).optional(),
 });
 export type AzureDevOpsConfig = z.infer<typeof AzureConfigZ>;
 
@@ -62,6 +66,65 @@ function reverseStateMapFor(config: AzureDevOpsConfig): Record<string, IssueStat
   const out: Record<string, IssueState> = {};
   for (const [k, v] of Object.entries(stateMapFor(config))) out[v] = k as IssueState;
   return out;
+}
+
+/** Default hivemind type → Azure work item type. Agile process names by
+ *  default (the most common); a Scrum/CMMI org overrides via `typeMap` (e.g.
+ *  story → "Product Backlog Item"). `support` maps to "Apoio" (a common custom
+ *  cross-team-assist work item type); `spike` maps to Task since Agile has no
+ *  dedicated spike kind. Override any of these via `typeMap` for your process. */
+const DEFAULT_TYPE_MAP: Record<import("../types.js").IssueType, string> = {
+  epic: "Epic",
+  feature: "Feature",
+  story: "User Story",
+  bug: "Bug",
+  support: "Apoio",
+  spike: "Task",
+  task: "Task",
+};
+
+function typeMapFor(config: AzureDevOpsConfig): Record<import("../types.js").IssueType, string> {
+  return {
+    ...DEFAULT_TYPE_MAP,
+    ...(config.typeMap as Partial<Record<import("../types.js").IssueType, string>>),
+  };
+}
+
+/** Azure work item type name → hivemind IssueType (reverse of typeMapFor, with
+ *  a few common aliases folded in so unmapped-but-recognizable names still land
+ *  somewhere sensible). Unknown types fall back to `task`. */
+function issueTypeFromAzure(
+  config: AzureDevOpsConfig,
+  azureType: string | undefined,
+): import("../types.js").IssueType | undefined {
+  if (!azureType) return undefined;
+  const reverse: Record<string, import("../types.js").IssueType> = {};
+  for (const [k, v] of Object.entries(typeMapFor(config))) {
+    reverse[v.toLowerCase()] = k as import("../types.js").IssueType;
+  }
+  // Common cross-process aliases not in the default map.
+  const aliases: Record<string, import("../types.js").IssueType> = {
+    "product backlog item": "story",
+    "user story": "story",
+    "issue": "task",
+    "impediment": "support",
+    "spike": "spike",
+  };
+  const key = azureType.trim().toLowerCase();
+  return reverse[key] ?? aliases[key];
+}
+
+/** The Azure work item type to CREATE/target for an issue: its explicit hive
+ *  `type` mapped through the config, else a caller hint, else the config
+ *  default type. Keeps the hive `type` field the source of truth for the
+ *  hierarchy level while still honoring a per-link remembered type. */
+function azureTypeForIssue(
+  config: AzureDevOpsConfig,
+  issue: Issue,
+  hintType?: string,
+): string {
+  if (issue.type) return typeMapFor(config)[issue.type];
+  return hintType || defaultTypeFor(config);
 }
 
 function authHeader(secret: string): string {
@@ -164,7 +227,20 @@ function fieldsToRemoteItem(config: AzureDevOpsConfig, item: AzureWorkItem): Rem
     assignedToName,
     workItemType: typeof f["System.WorkItemType"] === "string" ? f["System.WorkItemType"] : undefined,
     areaPath: typeof f["System.AreaPath"] === "string" ? f["System.AreaPath"] : undefined,
+    parentExternalId: parentIdFromRelations(item.relations),
   };
+}
+
+/** The parent work item id from an item's relations — the
+ *  `System.LinkTypes.Hierarchy-Reverse` link points to the parent; its `url`
+ *  ends with the numeric id. Undefined when the item is top-level. */
+function parentIdFromRelations(
+  relations: { rel?: string; url?: string }[] | undefined,
+): string | undefined {
+  const parent = (relations ?? []).find((r) => r.rel === "System.LinkTypes.Hierarchy-Reverse");
+  if (!parent?.url) return undefined;
+  const m = parent.url.match(/\/(\d+)(?:\?.*)?$/);
+  return m ? m[1] : undefined;
 }
 
 function buildPatch(
@@ -195,6 +271,19 @@ interface AzureWorkItem {
   rev: number;
   url: string;
   fields: Record<string, unknown>;
+  relations?: { rel?: string; url?: string }[];
+}
+
+interface AzureComment {
+  id: number;
+  text?: unknown;
+  createdDate?: unknown;
+  createdBy?: { displayName?: string; uniqueName?: string } | null;
+}
+
+interface AzureClassificationNode {
+  name: string;
+  children?: AzureClassificationNode[];
 }
 
 // ── provider ──────────────────────────────────────────────────────
@@ -259,12 +348,14 @@ export const azureDevOpsProvider: SyncProvider<AzureDevOpsConfig> = {
 
     const items: AzureWorkItem[] = [];
     const BATCH = 200; // Azure's per-request id limit
-    const FIELDS =
-      "System.Title,System.Description,System.State,System.Tags,System.AssignedTo,System.WorkItemType,System.AreaPath";
+    // $expand=relations returns each item's hierarchy links (parent/child) so we
+    // can reconstruct the Epic→Feature→Story tree locally. It's mutually
+    // exclusive with a `fields` filter, so we fetch full items and read the
+    // System.* fields we care about off `.fields`.
     for (let i = 0; i < ids.length; i += BATCH) {
       const chunk = ids.slice(i, i + BATCH);
       const batch = (await azureFetch(
-        `https://dev.azure.com/${org}/_apis/wit/workitems?ids=${chunk.join(",")}&fields=${FIELDS}&api-version=${API_VERSION}`,
+        `https://dev.azure.com/${org}/_apis/wit/workitems?ids=${chunk.join(",")}&$expand=relations&api-version=${API_VERSION}`,
         secret,
       )) as { value: AzureWorkItem[] };
       items.push(...batch.value);
@@ -275,7 +366,7 @@ export const azureDevOpsProvider: SyncProvider<AzureDevOpsConfig> = {
   async createRemoteItem(config, secret, issue, hint): Promise<PushResult> {
     const org = encodeURIComponent(config.organization);
     const project = encodeURIComponent(config.project);
-    const wtype = hint?.workItemType || defaultTypeFor(config);
+    const wtype = azureTypeForIssue(config, issue, hint?.workItemType);
     const type = encodeURIComponent(wtype);
     const created = (await azureFetch(
       `https://dev.azure.com/${org}/${project}/_apis/wit/workitems/$${type}?api-version=${API_VERSION}`,
@@ -367,6 +458,80 @@ export const azureDevOpsProvider: SyncProvider<AzureDevOpsConfig> = {
       state: reverse[remote.state] ?? "backlog",
       labels: remote.labels,
       assignee: remote.assignedTo ?? null,
+      type: issueTypeFromAzure(config, remote.workItemType),
     };
+  },
+
+  async listComments(config, secret, externalId) {
+    const org = encodeURIComponent(config.organization);
+    const project = encodeURIComponent(config.project);
+    // Work Item Comments live under a preview API version — the stable 7.1 API
+    // doesn't expose them. `order=asc` returns oldest→newest.
+    const res = (await azureFetch(
+      `https://dev.azure.com/${org}/${project}/_apis/wit/workItems/${externalId}/comments?api-version=7.1-preview.4&order=asc&$top=200`,
+      secret,
+    )) as { comments?: AzureComment[] };
+    const comments = res.comments ?? [];
+    return comments.map((c) => ({
+      id: String(c.id),
+      text: htmlToText(typeof c.text === "string" ? c.text : ""),
+      author:
+        c.createdBy && typeof c.createdBy === "object"
+          ? (c.createdBy.displayName ?? c.createdBy.uniqueName)
+          : undefined,
+      createdAt: typeof c.createdDate === "string" ? c.createdDate : undefined,
+    }));
+  },
+
+  async addComment(config, secret, externalId, text) {
+    const org = encodeURIComponent(config.organization);
+    const project = encodeURIComponent(config.project);
+    const created = (await azureFetch(
+      `https://dev.azure.com/${org}/${project}/_apis/wit/workItems/${externalId}/comments?api-version=7.1-preview.4`,
+      secret,
+      { method: "POST", body: { text: escapeHtml(text).replace(/\n/g, "<br>") } },
+    )) as AzureComment;
+    return {
+      id: String(created.id),
+      text,
+      author:
+        created.createdBy && typeof created.createdBy === "object"
+          ? (created.createdBy.displayName ?? created.createdBy.uniqueName)
+          : undefined,
+      createdAt: typeof created.createdDate === "string" ? created.createdDate : undefined,
+    };
+  },
+
+  async listAreas(config, secret) {
+    const org = encodeURIComponent(config.organization);
+    const project = encodeURIComponent(config.project);
+    // Classification nodes → the area tree. depth=10 pulls the whole subtree in
+    // one call; we flatten it to full "Project\Area\Sub" paths (the value Azure
+    // stores in System.AreaPath).
+    const res = (await azureFetch(
+      `https://dev.azure.com/${org}/${project}/_apis/wit/classificationnodes/areas?$depth=10&api-version=${API_VERSION}`,
+      secret,
+    )) as AzureClassificationNode;
+    const out: RemoteTaxonomyNode[] = [];
+    // The root node's `name` is the project; children paths build on it. Azure
+    // area paths use backslashes and DON'T include the "\Area" segment the API
+    // uses internally, so we build from node names directly.
+    const walk = (node: AzureClassificationNode, prefix: string) => {
+      const path = prefix ? `${prefix}\\${node.name}` : node.name;
+      out.push({ path, name: node.name });
+      for (const c of node.children ?? []) walk(c, path);
+    };
+    walk(res, "");
+    return out;
+  },
+
+  async listTeams(config, secret) {
+    const org = encodeURIComponent(config.organization);
+    const project = encodeURIComponent(config.project);
+    const res = (await azureFetch(
+      `https://dev.azure.com/${org}/_apis/projects/${project}/teams?api-version=${API_VERSION}`,
+      secret,
+    )) as { value?: { id: string; name: string }[] };
+    return (res.value ?? []).map((t) => ({ path: t.name, name: t.name }));
   },
 };

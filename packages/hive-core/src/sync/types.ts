@@ -13,7 +13,7 @@
  * canonical fields. Anything provider-specific (work item type, area path,
  * a state-name map) lives in that provider's own `TConfig`.
  */
-import type { Issue, IssueState } from "../types.js";
+import type { Issue, IssueState, IssueType } from "../types.js";
 
 /** A remote item, already flattened to the fields hivemind understands. */
 export interface RemoteItem {
@@ -39,6 +39,10 @@ export interface RemoteItem {
   /** Provider-specific area/board path (Azure: `System.AreaPath`). The board an
    *  item belongs to; a state move must respect the pattern of THIS area. */
   areaPath?: string;
+  /** The remote id of this item's PARENT work item (Azure hierarchy link), when
+   *  it has one. Lets the engine reconstruct the Epic→Feature→Story tree locally
+   *  by matching parents' externalIds to local issues. Undefined = top-level. */
+  parentExternalId?: string;
 }
 
 export interface PushResult {
@@ -117,5 +121,60 @@ export interface SyncProvider<TConfig = unknown> {
     state: IssueState;
     labels: string[];
     assignee?: string | null;
+    /** Canonical hivemind type mapped from the remote work item type, or
+     *  undefined when the remote type doesn't map to a known kind. */
+    type?: IssueType;
   };
+
+  // ── comments (optional; providers that support work-item comments) ────────
+  /** Fetch the remote item's comments, oldest→newest. Each carries a stable
+   *  remote `id` so the engine can tell which local activity entries have
+   *  already been mirrored and avoid re-pulling them. Absent on providers with
+   *  no comment concept. */
+  listComments?(
+    config: TConfig,
+    secret: string,
+    externalId: string,
+  ): Promise<RemoteComment[]>;
+  /** Post a new comment to the remote item. Returns the created comment's
+   *  stable id so the engine can record it as already-synced. */
+  addComment?(
+    config: TConfig,
+    secret: string,
+    externalId: string,
+    text: string,
+  ): Promise<RemoteComment>;
+
+  // ── board taxonomy (optional; for the New-issue Area/Team pickers) ────────
+  /** List the area paths (boards) available in this provider's scope, so the
+   *  New-issue modal can offer a dropdown instead of a free-text field. Flat
+   *  list of full paths (Azure `System.AreaPath` values). Absent on providers
+   *  with no area concept. */
+  listAreas?(config: TConfig, secret: string): Promise<RemoteTaxonomyNode[]>;
+  /** List the teams the authenticated user can see in this project — used to
+   *  scope/label the area picker (an Azure team maps to a default area). */
+  listTeams?(config: TConfig, secret: string): Promise<RemoteTaxonomyNode[]>;
+}
+
+/** A remote board-taxonomy node (an Azure area path or team), flattened for the
+ *  UI pickers. `path` is the value stamped onto the issue (the full area path);
+ *  `name` is the human label. */
+export interface RemoteTaxonomyNode {
+  /** The value to store (Azure full area path, e.g. "Proj\\Team\\Sub"). */
+  path: string;
+  /** Short display name (the leaf, or the team name). */
+  name: string;
+}
+
+/** A remote work-item comment, flattened to what the engine needs to mirror it
+ *  into (and out of) the local activity log without loops. */
+export interface RemoteComment {
+  /** Stable remote comment id (Azure comment id). */
+  id: string;
+  /** Comment body as plain text. */
+  text: string;
+  /** Author display name / email, for the activity `who`. */
+  author?: string;
+  /** ISO timestamp of when it was posted, if the provider reports it. */
+  createdAt?: string;
 }

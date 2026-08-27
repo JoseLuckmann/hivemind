@@ -14,7 +14,7 @@
  * sync doesn't touch (assignee, parent, ...).
  */
 import { createHash } from "node:crypto";
-import { listIssues, readIssue, createIssue, updateIssue, setSyncLink } from "../storage.js";
+import { listIssues, readIssue, createIssue, updateIssue, setSyncLink, commentOnIssue } from "../storage.js";
 import type { Issue, IssueSummary } from "../types.js";
 import { PENDING_EXTERNAL_ID } from "../types.js";
 import type { RemoteItem, SyncProvider } from "./types.js";
@@ -133,6 +133,11 @@ export async function runSync<TConfig>(
         if (remote.state && remote.state !== link.remoteState) {
           await touchRemoteState(root, provider.id, summary.id, remote);
         }
+        // Comments are tracked independently of the field hash/rev (a new
+        // comment on either side isn't a field edit), so ALWAYS reconcile them.
+        await syncComments(root, provider, config, secret, summary.id).catch((e) => {
+          report.errors.push({ id: summary.id, message: `comments: ${errMsg(e)}` });
+        });
         continue;
       }
 
@@ -145,6 +150,10 @@ export async function runSync<TConfig>(
         await push(root, provider, config, secret, issue, link, remote);
         report.pushed++;
       }
+      // Reconcile comments in the same pass (both directions), after fields.
+      await syncComments(root, provider, config, secret, summary.id).catch((e) => {
+        report.errors.push({ id: summary.id, message: `comments: ${errMsg(e)}` });
+      });
     } catch (e) {
       report.errors.push({ id: summary.id, message: errMsg(e) });
     }
@@ -157,6 +166,20 @@ export async function runSync<TConfig>(
       report.created++;
     } catch (e) {
       report.errors.push({ externalId: remote.externalId, message: errMsg(e) });
+    }
+  }
+
+  // Reconstruct the hierarchy (Epic→Feature→Story): now that every remote item
+  // has a local counterpart, map each item's remote parent id to the local
+  // parent issue id and set `parent` where it differs. Skipped when the provider
+  // doesn't report parents. Best-effort — a missing/unsynced parent is left
+  // untouched (top-level locally).
+  const anyParents = remoteItems.some((r) => r.parentExternalId);
+  if (anyParents) {
+    try {
+      await resolveHierarchy(root, provider.id, remoteItems);
+    } catch (e) {
+      report.errors.push({ message: `hierarchy: ${errMsg(e)}` });
     }
   }
 
@@ -206,17 +229,20 @@ function toPatch(fields: {
   state: Issue["state"];
   labels: string[];
   assignee?: string | null;
+  type?: Issue["type"];
 }): {
   title: string;
   description: string;
   labels: string[];
   assignee?: Issue["assignee"];
+  type?: Issue["type"];
 } {
   const patch: {
     title: string;
     description: string;
     labels: string[];
     assignee?: Issue["assignee"];
+    type?: Issue["type"];
   } = {
     title: fields.title,
     description: fields.description,
@@ -225,6 +251,9 @@ function toPatch(fields: {
   if (fields.assignee !== undefined) {
     patch.assignee = fields.assignee ? { type: "member", id: fields.assignee } : null;
   }
+  // Only set type when the remote mapped to a known kind — never clobber a
+  // locally-set type with `undefined`.
+  if (fields.type !== undefined) patch.type = fields.type;
   return patch;
 }
 
@@ -357,6 +386,7 @@ async function createLocal<TConfig>(
     title: fields.title,
     description: fields.description,
     state: fields.state,
+    type: fields.type,
     labels: fields.labels,
     assignee: fields.assignee ? { type: "member", id: fields.assignee } : null,
     who: "sync",
@@ -376,4 +406,109 @@ async function createLocal<TConfig>(
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** Reconstruct the local parent hierarchy from the remote items' parent links.
+ *  Builds a remote-externalId → local-issue-id index from every issue's sync
+ *  link, then for each remote item that has a parent, sets the local issue's
+ *  `parent` to the local id of that parent — but only when BOTH ends are synced
+ *  locally and the value actually changes (avoids churn). A remote parent that
+ *  isn't synced locally (out of scope) is left as top-level. */
+async function resolveHierarchy(
+  root: string,
+  providerId: string,
+  remoteItems: RemoteItem[],
+): Promise<void> {
+  const summaries = await listIssues(root);
+  // externalId → local issue id
+  const localByExternal = new Map<string, string>();
+  for (const s of summaries) {
+    const link = (s.sync ?? []).find((x) => x.provider === providerId);
+    if (link && link.externalId && link.externalId !== PENDING_EXTERNAL_ID) {
+      localByExternal.set(link.externalId, s.id);
+    }
+  }
+  for (const remote of remoteItems) {
+    if (!remote.parentExternalId) continue;
+    const childLocal = localByExternal.get(remote.externalId);
+    const parentLocal = localByExternal.get(remote.parentExternalId);
+    if (!childLocal || !parentLocal || childLocal === parentLocal) continue;
+    const issue = await readIssue(root, childLocal);
+    if (issue.parent === parentLocal) continue;
+    await updateIssue(root, childLocal, { parent: parentLocal }, "sync", `parent set from ${providerId} hierarchy`);
+  }
+}
+
+// ── comment reconciliation ──────────────────────────────────────────
+
+/** The activity `who` value stamped on comments mirrored IN from the remote.
+ *  Prefix so the pusher can recognize (and skip) them — never echo a remote
+ *  comment back to the remote. */
+export const SYNC_COMMENT_WHO_PREFIX = "azure";
+
+/** Non-pushable activity actors — the sync engine's own writes. Anything else
+ *  (a human "ui" comment, an "agent" note) is user content eligible to push. */
+function isSyncAuthored(who: string): boolean {
+  return who === "sync" || who.startsWith(SYNC_COMMENT_WHO_PREFIX);
+}
+
+/** Two-way comment reconciliation for ONE linked issue:
+ *   • PULL — append remote comments not yet mirrored (tracked by remote id on
+ *     the link) into the activity log, stamped with a sync actor so they're
+ *     never pushed back.
+ *   • PUSH — post local activity entries authored by a human/agent that are
+ *     past the link's high-water mark up to the remote as work-item comments.
+ *
+ *  Loop-safe: mirrored-in comments are excluded from push (by actor), and
+ *  pulled ids are remembered so a re-sync is idempotent. No-op when the
+ *  provider doesn't support comments. */
+async function syncComments<TConfig>(
+  root: string,
+  provider: SyncProvider<TConfig>,
+  config: TConfig,
+  secret: string,
+  id: string,
+): Promise<void> {
+  if (!provider.listComments || !provider.addComment) return;
+  const issue = await readIssue(root, id);
+  const link = (issue.sync ?? []).find((s) => s.provider === provider.id);
+  if (!link || link.externalId === PENDING_EXTERNAL_ID) return;
+
+  const knownRemoteIds = new Set(link.syncedCommentIds ?? []);
+
+  // ── PULL: mirror new remote comments into the activity log ──
+  const remoteComments = await provider.listComments(config, secret, link.externalId);
+  const newRemote = remoteComments.filter((c) => !knownRemoteIds.has(c.id));
+  for (const c of newRemote) {
+    const who = c.author
+      ? `${SYNC_COMMENT_WHO_PREFIX}:${c.author}`
+      : SYNC_COMMENT_WHO_PREFIX;
+    await commentOnIssue(root, id, c.text, who);
+    knownRemoteIds.add(c.id);
+  }
+
+  // ── PUSH: post local human/agent comments past the high-water mark ──
+  // Re-read so the just-appended mirror comments are present; they're
+  // sync-authored so they won't be pushed, but count only user-authored entries
+  // for a stable high-water mark that survives re-parsing.
+  const after = await readIssue(root, id);
+  const userEntries = after.sections.activity.filter((a) => !isSyncAuthored(a.who));
+  const pushed = link.pushedCommentCount ?? 0;
+  const toPush = userEntries.slice(pushed);
+  for (const entry of toPush) {
+    await provider.addComment(config, secret, link.externalId, entry.message);
+  }
+
+  // Persist bookkeeping only when something moved, to avoid a noisy write.
+  const newPushed = pushed + toPush.length;
+  if (newRemote.length > 0 || toPush.length > 0) {
+    const fresh =
+      (await readIssue(root, id)).sync?.find((s) => s.provider === provider.id) ?? link;
+    await setSyncLink(root, id, {
+      ...fresh,
+      syncedCommentIds: [...knownRemoteIds],
+      pushedCommentCount: newPushed,
+      syncedAt: new Date().toISOString(),
+    });
+  }
 }
