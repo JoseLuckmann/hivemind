@@ -1,8 +1,8 @@
 /**
  * Installers for hivemind's "agentic stack" — the pieces that teach a claude
  * agent how to drive this workspace:
- *   - `.mcp.json`        → the `hive` MCP server (issue tools + control plane)
- *   - `.claude/skills/hive-work/SKILL.md` → the workflow skill the agent loads
+ *   - `.mcp.json`        → the `hive` MCP server (issue tools )
+ *   - `.claude/skills/hive-work/SKILL.md` → the issue-execution skill the agent loads
  *   - CLAUDE.md agentic section → prose pointing the agent at both
  *
  * `hive init` runs all three (agentic by default); `hive add mcp` / `hive add
@@ -83,13 +83,10 @@ async function writeSkillIfMissing(cwd: string, name: string, body: string): Pro
   }
 }
 
-/** Install the hive agent skills — `hive-work` (issue execution contract) and
- *  `hive-workflow` (multi-agent orchestration). Each is written only if missing.
- *  Returns "created" if EITHER was newly written. */
+/** Install the hive issue-execution skill if it is missing. */
 export async function installHiveSkill(cwd: string): Promise<AgenticReport["skill"]> {
   const work = await writeSkillIfMissing(cwd, "hive-work", templates.HIVE_WORK_SKILL);
-  const workflow = await writeSkillIfMissing(cwd, "hive-workflow", templates.hiveWorkflowSkill());
-  return work || workflow ? "created" : "unchanged";
+  return work ? "created" : "unchanged";
 }
 
 /** The full agentic stack: CLAUDE.md section + MCP + skill. */

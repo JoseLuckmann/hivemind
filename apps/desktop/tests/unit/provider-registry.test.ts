@@ -23,6 +23,8 @@ test("providerFor matches by command basename", () => {
   assert.equal(providerFor("/opt/codex")?.id, "codex");
   assert.equal(providerFor("droid")?.id, "droid");
   assert.equal(providerFor("/usr/local/bin/droid")?.id, "droid");
+  assert.equal(providerFor("kiro-cli")?.id, "kiro");
+  assert.equal(providerFor("/usr/local/bin/kiro-cli")?.id, "kiro");
   assert.equal(providerFor("pi")?.id, "pi");
   assert.equal(providerFor("/opt/pi")?.id, "pi");
   assert.equal(providerFor("bash"), undefined);

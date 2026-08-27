@@ -13,16 +13,22 @@ import {
 } from "@hivemind/core";
 import { err, ok } from "../format.js";
 
-const KNOWN_AGENTS = [
-  "claude",
-  "codex",
-  "gemini",
-  "opencode",
-  "openclaw",
-  "hermes",
-  "amp",
-  "cursor",
-  "pi",
+// Known agent CLIs, as { id → binary on PATH }. The id is the stable agent name
+// recorded in config.yaml (and matched by --assignee); the binary is what we
+// probe with `which`. They differ for kiro: the agent id is `kiro` but the CLI
+// binary is `kiro-cli` (bare `kiro` is the Kiro IDE, a different program).
+const KNOWN_AGENTS: Array<{ id: string; bin: string }> = [
+  { id: "claude", bin: "claude" },
+  { id: "codex", bin: "codex" },
+  { id: "gemini", bin: "gemini" },
+  { id: "opencode", bin: "opencode" },
+  { id: "openclaw", bin: "openclaw" },
+  { id: "hermes", bin: "hermes" },
+  { id: "amp", bin: "amp" },
+  { id: "cursor", bin: "cursor" },
+  { id: "pi", bin: "pi" },
+  { id: "droid", bin: "droid" },
+  { id: "kiro", bin: "kiro-cli" },
 ];
 
 const contextCmd = defineCommand({
@@ -63,11 +69,11 @@ const detectCmd = defineCommand({
       const root = await requireRoot();
       const cfg = await readConfig(root);
       const detected: Record<string, { bin: string; model?: string }> = {};
-      for (const name of KNOWN_AGENTS) {
-        const which = spawnSync("which", [name], { encoding: "utf8" });
+      for (const { id, bin: binName } of KNOWN_AGENTS) {
+        const which = spawnSync("which", [binName], { encoding: "utf8" });
         const bin = which.stdout.trim();
         if (which.status === 0 && bin) {
-          detected[name] = { bin };
+          detected[id] = { bin };
         }
       }
       cfg.agents = detected;

@@ -265,13 +265,25 @@ function detectKimi(content: string): AgentState {
 
 function detectKiro(content: string): AgentState {
   const lower = content.toLowerCase();
+  // Approval prompt (permission gate). kiro-cli shows Allow / Deny and, when it
+  // can derive a saved rule, Always allow / Always deny for a tool that needs
+  // consent (docs/permissions "Interactive approval flow"). Match the action
+  // vocabulary so a tile sitting on a prompt reads "blocked" (attention badge +
+  // "Needs your input"), not idle.
+  const allow = lower.includes("always allow") || lower.includes("[a]llow") || lower.includes("> allow");
+  const deny = lower.includes("always deny") || lower.includes("[d]eny") || lower.includes("> deny");
+  if ((allow && deny) || lower.includes("always allow") || lower.includes("always deny")) return "blocked";
   const toolSpinner = content.split("\n").some((line) => {
     const trimmed = line.trimStart();
     const first = trimmed.charAt(0);
     if (!"◔◑◕●".includes(first)) return false;
     return /[a-z]/i.test(trimmed.slice(1).trimStart().charAt(0));
   });
-  if (lower.includes("kiro is working") || (lower.includes("esc to cancel") && toolSpinner))
+  if (
+    lower.includes("kiro is working") ||
+    lower.includes("thinking... (esc to cancel)") ||
+    (lower.includes("esc to cancel") && toolSpinner)
+  )
     return "working";
   return "idle";
 }

@@ -91,6 +91,21 @@ test("droid: EXECUTE approval → blocked, braille+esc to stop → working", () 
   assert.equal(detectAgentState("droid", "❯ "), "idle");
 });
 
+test("kiro: approval prompt → blocked, working chrome → working, prompt → idle", () => {
+  // Approval flow vocabulary (docs/permissions): Allow / Deny / Always allow / Always deny.
+  assert.equal(
+    detectAgentState("kiro", "Run shell command: rm x\nAllow\nDeny\nAlways allow\nAlways deny"),
+    "blocked",
+  );
+  assert.equal(detectAgentState("kiro", "Always allow this command?"), "blocked");
+  // Working chrome captured from kiro-cli 2.19.2.
+  assert.equal(detectAgentState("kiro", "Kiro is working · Type to steer · Ctrl+S to queue"), "working");
+  assert.equal(detectAgentState("kiro", "⠙ Thinking... (esc to cancel)"), "working");
+  // Tool spinner (◔/◑/◕/●) + esc to cancel → working.
+  assert.equal(detectAgentState("kiro", "◔ reading file\nesc to cancel"), "working");
+  assert.equal(detectAgentState("kiro", "❯ "), "idle");
+});
+
 test("amp: approval footer → blocked, esc to cancel → working", () => {
   const blocked = "Run this command?\nApprove\nAllow All for This Session\nDeny with feedback";
   assert.equal(detectAgentState("amp", blocked), "blocked");

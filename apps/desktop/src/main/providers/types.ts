@@ -61,6 +61,13 @@ export interface ProviderSpawnContext {
    *  daemon seeds it + writes droid's hooks.json there). Unset → droid runs with
    *  its normal home and no injected hooks (screen-scrape status only). */
   droidHome?: string;
+  /** The ephemeral KIRO_HOME home for kiro-cli hook injection (the daemon seeds
+   *  it + writes our `agents/hivemind.json` there). Unset → kiro runs with its
+   *  normal home and no injected hooks (screen-scrape status only). */
+  kiroHome?: string;
+  /** kiro-specific `stop` hook script: forwards the inline `assistant_response`
+   *  as the turn reply (kiro's stop payload has no transcript_path). */
+  kiroStopHookPath?: string;
 }
 
 export interface AgentProvider {

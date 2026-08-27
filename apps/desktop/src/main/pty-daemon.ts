@@ -25,6 +25,9 @@ import { notificationHookSource } from "./hcp/notification-hook-source.js";
 import { userpromptHookSource } from "./hcp/userprompt-hook-source.js";
 import { seedDroidHome } from "./hcp/droid-home.js";
 import { droidHooksSettings } from "./droid-resume.js";
+import { seedKiroHome } from "./hcp/kiro-home.js";
+import { kiroStopHookSource } from "./hcp/kiro-stop-hook-source.js";
+import { kiroAgentConfig } from "./kiro-resume.js";
 import { readOrCreateToken, hcpSockPath } from "./hcp/token.js";
 
 const socketPath = process.argv[2] || process.env.HIVEMIND_PTY_SOCK;
@@ -109,6 +112,13 @@ try { fs.writeFileSync(userpromptHookPath, userpromptHookSource()); } catch { /*
 // into spawned pi tiles via pi-resume (env + `-e` arg). Best-effort write.
 const piExtPath = path.join(userDataDir, "hive-pi-ext.mjs");
 try { fs.writeFileSync(piExtPath, piExtSource()); } catch { /* best-effort */ }
+// kiro-cli stop hook — kiro's `stop` payload carries the reply INLINE as
+// `assistant_response` (no transcript_path, and its transcript isn't Anthropic
+// format), so kiro needs its OWN stop hook (forwards the inline reply as the turn
+// text, the pi path) rather than the shared claude/droid one. Reuses the shared
+// userprompt hook verbatim for turn-start. Best-effort write.
+const kiroStopHookPath = path.join(userDataDir, "hcp-kiro-stop-hook.cjs");
+try { fs.writeFileSync(kiroStopHookPath, kiroStopHookSource()); } catch { /* best-effort */ }
 const hcpSock = hcpSockPath(userDataDir);
 const hcpToken = readOrCreateToken(userDataDir);
 
@@ -123,6 +133,21 @@ try {
   seedDroidHome({
     droidHome,
     hooks: droidHooksSettings({ execPath: process.execPath, stopHookPath, userpromptHookPath, notificationHookPath, hcpSock }),
+  });
+} catch { /* best-effort */ }
+
+// kiro-cli deterministic hooks: kiro has no inline `--settings` either — its
+// hooks live in a custom agent config, and KIRO_HOME relocates the whole ~/.kiro
+// home. So we point kiro at an EPHEMERAL KIRO_HOME (symlinks to the real ~/.kiro
+// for auth/settings/sessions + our own `agents/hivemind.json`) — never touching
+// the user's ~/.kiro. The agent's hooks wire kiro's userPromptSubmit/stop to the
+// HCP scripts (stop → the KIRO-specific inline-reply hook). Best-effort: a seed
+// failure just disables kiro hooks (the screen-scrape detector still drives status).
+const kiroHome = path.join(userDataDir, "kiro-home");
+try {
+  seedKiroHome({
+    kiroHome,
+    agentConfig: kiroAgentConfig({ execPath: process.execPath, kiroHome, stopHookPath: kiroStopHookPath, userpromptHookPath, hcpSock, hcpToken }),
   });
 } catch { /* best-effort */ }
 
@@ -148,6 +173,8 @@ const resume = composeResume({
   hcpToken,
   piExtPath,
   droidHome,
+  kiroHome,
+  kiroStopHookPath,
 });
 
 const snapshotPath = (id: string): string => {
