@@ -44,6 +44,7 @@ const WORKFLOW_HANDLE_STYLE: CSSProperties = {
 
 const DiffTile = lazy(() => import("./DiffTile").then((m) => ({ default: m.DiffTile })));
 const WorkbenchTile = lazy(() => import("./WorkbenchTile").then((m) => ({ default: m.WorkbenchTile })));
+const FileExplorerTile = lazy(() => import("./FileExplorerTile").then((m) => ({ default: m.FileExplorerTile })));
 
 /** Screen-space rect captured from a tile's DOM at pin time (SCREEN pixels). */
 export type PinRect = { sx: number; sy: number; w: number; h: number };
@@ -695,6 +696,21 @@ export function TileBody({
           />
         </TileErrorBoundary>
       );
+    case "explorer":
+      return (
+        <TileErrorBoundary label="Explorer" onClose={data.onClose as (() => void) | undefined}>
+          <Suspense fallback={<TileLoading label="Loading explorer…" />}>
+            <FileExplorerTile
+              id={data.id as string}
+              folder={data.folder as string}
+              onSetFolder={data.onSetFolder as (id: string, folder: string) => void}
+              onClose={data.onClose as () => void}
+              pinned={data.pinned as boolean | undefined}
+              onTogglePin={data.onTogglePin as never}
+            />
+          </Suspense>
+        </TileErrorBoundary>
+      );
     case "browser":
       return (
         <TileErrorBoundary label="Browser" onClose={data.onClose as (() => void) | undefined}>
@@ -877,6 +893,29 @@ const TriggerNode = memo(function TriggerNode({
   );
 });
 
+type ExplorerNodeData = {
+  id: string;
+  folder: string;
+  onSetFolder: (id: string, folder: string) => void;
+  onClose?: () => void;
+};
+const ExplorerNode = memo(function ExplorerNode({
+  id,
+  data,
+  selected,
+}: {
+  id: string;
+  data: WithResize<ExplorerNodeData>;
+  selected: boolean;
+}) {
+  const wheelRef = useTileWheelZoom(selected);
+  return (
+    <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={480} minHeight={320} wheelRef={wheelRef}>
+      <TileBody type="explorer" data={data as unknown as Record<string, unknown>} selected={selected} />
+    </TileShell>
+  );
+});
+
 type BrowserNodeData = {
   tileId: string;
   frameId?: string | null;
@@ -963,6 +1002,7 @@ export const nodeTypes: NodeTypes = {
   file: FileNode as unknown as NodeTypes[string],
   cmdButton: CmdButtonNode as unknown as NodeTypes[string],
   trigger: TriggerNode as unknown as NodeTypes[string],
+  explorer: ExplorerNode as unknown as NodeTypes[string],
   issues: IssuesNode as unknown as NodeTypes[string],
   browser: BrowserNode as unknown as NodeTypes[string],
   planReview: PlanReviewNode as unknown as NodeTypes[string],

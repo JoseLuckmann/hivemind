@@ -52,6 +52,8 @@ export interface NodeBuildCtx {
   openFileFromTerminal: (sourceTileId: string, path: string) => void;
   closeTabInTile: (tileId: string, file: string) => void;
   closeTile: (id: string) => void;
+  /** explorer only — repoint a File Explorer tile at a different folder. */
+  onSetFolder: (id: string, folder: string) => void;
   onNodeResizeCommit: (id: string, w: number, h: number, x?: number, y?: number) => void;
   renameTile: (id: string, name: string) => void;
   setAgentTitle: (id: string, title: string) => void;
@@ -76,7 +78,7 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
     tileNames, agentTitles, frameTiles, framesChipNames,
     updateFrameTitle, updateFrameColor, deleteFrame, arrangeFrame, bringFrameToFront,
     onAttachWorktree, onCreateWorktree, unbindBranch, bindWorkspace, unbindWorkspace,
-    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onNodeResizeCommit, renameTile, setAgentTitle,
+    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, onNodeResizeCommit, renameTile, setAgentTitle,
     editCmdButton, editTrigger, runTrigger, triggerRuns,
     onTogglePin, onPinChange,
   } = ctx;
@@ -246,6 +248,24 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
           repoPath: effRepo,
           file: t.file ?? "",
           onOpenInBrowser: (url: string) => openUrlInBrowser(t.id, url),
+          onClose: () => closeTile(t.id),
+          onResize: onNodeResizeCommit,
+        },
+        dragHandle: ".tile-drag-handle",
+      };
+    } else if (t.kind === "explorer") {
+      // Not repo-gated like file/editor/diff — an Explorer can browse ANY
+      // folder, including a non-git one (gitListFiles falls back to a plain
+      // walk), so it renders (and prompts to choose a folder) even with no
+      // bound repo at all.
+      node = {
+        id: t.id,
+        type: "explorer",
+        style: sized(t.id, w, h),
+        data: {
+          id: t.id,
+          folder: t.folder ?? effRepo ?? "",
+          onSetFolder,
           onClose: () => closeTile(t.id),
           onResize: onNodeResizeCommit,
         },

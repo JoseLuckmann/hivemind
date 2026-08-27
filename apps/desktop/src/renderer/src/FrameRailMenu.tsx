@@ -22,7 +22,6 @@ import { createPortal } from "react-dom";
 import {
   GitBranch, FolderGit2, Server, LayoutGrid, Plus, Pencil, Trash2, Palette,
   Bot, GitCommitHorizontal, ChevronRight, ArrowUp, ArrowDown, FileText,
-  IndentIncrease, IndentDecrease,
 } from "lucide-react";
 import { AGENTS } from "./agents";
 import { WorktreePicker } from "./WorktreePicker";
@@ -45,12 +44,6 @@ export interface FrameActions {
   onRename: (frameId: string, title: string) => void;
   onColor: (frameId: string, color: string) => void;
   onDelete: (frameId: string) => void;
-  /** Re-parent a frame under `parentId`, or detach it (parentId = null) to
-   *  top-level. Mirrors the drag-to-nest gesture for pointer-free re-nesting. */
-  onNest?: (frameId: string, parentId: string | null) => void;
-  /** Top-level frames this frame can be nested under (excludes itself, its own
-   *  descendants, and other children). Empty → no eligible target. */
-  nestTargets?: (frameId: string) => { id: string; title: string }[];
   /** Open the git commit/sync modal for this frame's repo. */
   onGit: (frameId: string) => void;
   /** Push / pull this frame's repo directly (rail Git ▸ Push / Pull). */
@@ -147,14 +140,11 @@ export function FrameRailMenu({
   onRequestRename: (frameId: string) => void;
 }) {
   // Which top-level submenu is expanded (only one at a time). null = none.
-  const [sub, setSub] = useState<null | "agent" | "open" | "git" | "worktree" | "workspace" | "arrange" | "color" | "nest">(null);
+  const [sub, setSub] = useState<null | "agent" | "open" | "git" | "worktree" | "workspace" | "arrange" | "color">(null);
   const isWorktreeChild = !!frame.parentFrameId;
   const repoPath = actions.repoPathForFrame(frame.id);
   const fid = frame.id;
   const close = onClose;
-  // Candidate parents for pointer-free re-nesting (menu equivalent of the
-  // drag-into-frame gesture). Only shown when the host wired onNest.
-  const nestTargets = actions.nestTargets?.(fid) ?? [];
 
   // Clamp so the root menu never spills off the right/bottom edge (submenus open
   // leftward-of-right via left-full; the root stays clear of the right gutter to
@@ -184,17 +174,6 @@ export function FrameRailMenu({
             <Item key={kind} icon={<Icon size={13} />} label={label} onClick={() => { actions.onOpenInFrame(fid, kind); close(); }} />
           ))}
           <Item icon={<FileText size={13} />} label="File…" onClick={() => { actions.onOpenFilePicker(fid); close(); }} />
-          {([
-            ["shell", "Terminal"],
-            ["tree", "Editor"],
-            ["diff", "Diff"],
-            ["issues", "Issues"],
-            ["browser", "Browser"],
-            ["cmdButton", "Command button"],
-            ["trigger", "Trigger"],
-          ] as const).map(([kind, label]) => (
-            <Item key={kind} icon={<Plus size={13} />} label={label} onClick={() => { actions.onOpenInFrame(fid, kind); close(); }} />
-          ))}
         </SubmenuRow>
 
         <SubmenuRow icon={<GitCommitHorizontal size={13} />} label="Git" open={sub === "git"} onOpen={() => setSub("git")}>
@@ -240,24 +219,8 @@ export function FrameRailMenu({
           ))}
         </SubmenuRow>
 
-        {/* Re-nest (menu equivalent of dragging a frame into another). A child
-            can detach to top-level; a top-level frame can nest under a repo. */}
-        {actions.onNest && (isWorktreeChild || nestTargets.length > 0) && (
-          <>
-            {nestTargets.length > 0 && (
-              <SubmenuRow icon={<IndentIncrease size={13} />} label="Nest under" open={sub === "nest"} onOpen={() => setSub("nest")}>
-                {nestTargets.map((t) => (
-                  <Item key={t.id} icon={<FolderGit2 size={13} />} label={t.title} onClick={() => { actions.onNest!(fid, t.id); close(); }} />
-                ))}
-              </SubmenuRow>
-            )}
-            {isWorktreeChild && (
-              <Item icon={<IndentDecrease size={13} />} label="Detach from parent" onClick={() => { actions.onNest!(fid, null); close(); }} />
-            )}
-          </>
-        )}
-
         <Sep />
+
         <Item icon={<Pencil size={13} />} label="Rename" onClick={() => { onRequestRename(fid); close(); }} />
         <SubmenuRow icon={<Palette size={13} />} label="Color" open={sub === "color"} onOpen={() => setSub("color")}>
           <div className="flex flex-wrap gap-1.5 p-1.5 w-[150px]">

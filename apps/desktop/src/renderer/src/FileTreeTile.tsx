@@ -23,6 +23,11 @@ interface Props {
   repoPath: string;
   /** Optional callback when a file row is selected (e.g., open a diff tile). */
   onSelectFile?: (path: string) => void;
+  /** Optional callback when a DIRECTORY row is selected (e.g. the File
+   *  Explorer tile navigating its icon-grid pane into that folder). Path has
+   *  no trailing slash. Editor-style consumers that only want files can leave
+   *  this unset — directory clicks are otherwise silently ignored (see below). */
+  onSelectDir?: (path: string) => void;
   /** When true, render only the tree — no outer tile chrome (border/shadow)
    *  and no internal header (the embedding host supplies its own). Defaults
    *  to false so the standalone tile keeps its full chrome. */
@@ -64,7 +69,7 @@ const STATUS_COLOR: Record<GitFileStatus, string> = {
   conflicted: "var(--color-err)",
 };
 
-export function FileTreeTile({ repoPath, onSelectFile, embedded = false }: Props) {
+export function FileTreeTile({ repoPath, onSelectFile, onSelectDir, embedded = false }: Props) {
   const { data: paths = [], isLoading, error: listError } = useGitListFiles(repoPath);
   const { data: status } = useGitStatus(repoPath);
 
@@ -110,14 +115,13 @@ export function FileTreeTile({ repoPath, onSelectFile, embedded = false }: Props
     initialVisibleRowCount: 20,
     onSelectionChange: (sel) => {
       const first = sel[0];
-      if (!first || !onSelectFile) return;
-      // Ignore directory selections (else the editor fileRead(<dir>) → EISDIR
-      // and poisons the tab). Pierre returns directory paths WITH a trailing
-      // slash, so strip it before the children check (the previous bug: a raw
-      // "internal/" never matched "internal//").
-      if (first.endsWith("/")) return;
-      if (isDirectory(first)) return;
-      onSelectFile(first);
+      if (!first) return;
+      // Pierre returns directory paths WITH a trailing slash — route those to
+      // onSelectDir (stripped) instead of treating them as a file (the editor
+      // fileRead(<dir>) → EISDIR bug this used to guard against).
+      if (first.endsWith("/")) { onSelectDir?.(first.slice(0, -1)); return; }
+      if (isDirectory(first)) { onSelectDir?.(first); return; }
+      onSelectFile?.(first);
     },
     renderRowDecoration: ({ item }): FileTreeRowDecoration | null => {
       if (item.kind === "directory") return null;

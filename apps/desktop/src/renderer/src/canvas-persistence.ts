@@ -31,6 +31,11 @@ export interface TileInstance {
   /** file only — the ONE repo-relative file this single-file editor tile edits.
    *  Persisted so the tile reopens on the same file. */
   file?: string;
+  /** explorer only — the absolute folder this File Explorer tile is bound to.
+   *  Unset ⇒ defaults to the owning frame's effective repo. Persisted so the
+   *  tile reopens pointed at the same folder (e.g. a subfolder an agent
+   *  writes into, not necessarily the frame's repo root). */
+  folder?: string;
   /** Pinned = the tile becomes a TRUE screen-fixed floating panel: its content is
    *  portaled out of react-flow's transformed viewport into a fixed full-window
    *  layer, so it holds a constant screen position + size, unaffected by canvas

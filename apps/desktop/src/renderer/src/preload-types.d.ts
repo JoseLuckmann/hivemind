@@ -32,7 +32,7 @@ declare global {
       ) => () => void;
       onFsChanged: (
         repoPath: string,
-        cb: (info: { paths: string[] }) => void
+        cb: (info: { paths: string[]; events?: { path: string; type: "added" | "modified" | "removed" }[] }) => void
       ) => () => void;
       /** Path passed on the CLI (`hivemind .` / `hivemind /repo`), or null. */
       getLaunchTarget: () => Promise<string | null>;
