@@ -1,6 +1,6 @@
 {
   "name": "@hivemind/desktop",
-  "version": "1.17.0-flow.2",
+  "version": "1.17.0-flow.3",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",

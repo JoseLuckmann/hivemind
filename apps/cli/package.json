@@ -1,6 +1,6 @@
 {
   "name": "@hivemind/cli",
-  "version": "1.17.0-flow.2",
+  "version": "1.17.0-flow.3",
   "private": true,
   "type": "module",
   "bin": { "hive": "./dist/hive" },
