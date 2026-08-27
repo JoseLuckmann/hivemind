@@ -35,30 +35,16 @@ lives in extracted modules/hooks that destructure a `ctx` object:
 - Pure, unit-tested modules: `frame-layout.ts` (layout/collision/frameAtPoint),
   `canvas-persistence.ts` (load/save/migrate localStorage layout),
   `canvas-node-build.ts` (`buildBaseNodes` + `mkTile`), `frame-color.ts`,
-  `canvas-sizing.ts`, `dom-focus.ts`, `workflow-engine.ts` (pure graph-walk
-  for canvas workflows), `workflow-scheduler.ts` (schedule-trigger timer).
+  `canvas-sizing.ts`, `dom-focus.ts`.
 - Leaf view modules: `canvas-islands/camera/overlays/nodes.tsx`, `FrameNode`,
   `LayersPanel`, the tiles (`TerminalTile`, `WorkbenchTile`/`EditorTile`,
-  `DiffTile`, `IssuesTile`, `FileTreeTile`, `CommandButtonTile`,
-  `TriggerTile`), `canvas-workflow-edge.tsx` (the user-drawn `workflow` edge
-  type — see `docs/canvas-workflows.md`).
+  `DiffTile`, `IssuesTile`, `FileTreeTile`.
 
 **Key invariant — `mkTile` (canvas-node-build):** a tile's effective repo/cwd is
 its owner frame's zone repo (`worktreePath ?? workspacePath`) else the global
 `repoPath`. This single override is how a tile "becomes" local / worktree /
 remote — the tile components don't know the difference. When gating editor/diff
 on "has a repo", gate on this *effective* repo, not the global one.
-
-## Canvas workflows
-
-A `trigger` tile connects to agent/`cmdButton` tiles via user-drawn
-`WorkflowEdge`s (Handle-based — the only edge type that is, everything else
-is a floating edge computed from geometry). `workflow-engine.ts` walks the
-graph purely; `Canvas.tsx` wires it to the real primitives — `agent.send`/
-`agent.read` via the new `hcp:invoke` renderer→main bridge (mirrors HCP's
-own `agent.send`/`agent.read`, just callable without going through the MCP
-socket) and `cmdRun`/`onCmdState` for the action step. Full design:
-`docs/canvas-workflows.md`.
 
 ## Remote (SSH) frames
 

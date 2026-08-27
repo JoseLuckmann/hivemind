@@ -7,6 +7,73 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+### Changed
+
+- **Canvas workflows removed.** Trigger and command tiles, scheduled runs, agent-to-agent pipelines, and their MCP/CLI entry points have been removed while the app refocuses on developer-led management of multiple agents.
+
+
+### Added
+
+- **Drag-to-reorder in the Layers panel.** Drag a tile row to reorder tiles within its frame (or
+  within the loose "Canvas" group), and drag a workspace's grip handle to reorder top-level frames.
+  The manual order is saved per-repo and restored on reopen; tiles/frames that open or close later
+  keep their spot and new ones append to the end.
+- **Kiro CLI (`kiro-cli`) as a fully-wired agent.** `kiro-cli` joins the agent registry, so it runs in
+  its own terminal tile and `hive_spawn_agent agent:"kiro"` picks it up. It's wired for the full HCP
+  worker lifecycle, not just as a hand-driven tile: an ephemeral `KIRO_HOME` overlay (symlinks to the
+  real `~/.kiro` for auth/sessions/steering + a hivemind-owned `agents/hivemind.json`) injects
+  deterministic lifecycle hooks — `userPromptSubmit`→working and `stop`→turn/idle — so status is
+  hook-driven and `hive_read`/`hive_workflow` gather a clean reply (kiro's `stop` carries the reply
+  inline as `assistant_response`, so it rides the same inline-text path pi uses). The injected agent
+  trusts all tools so a worker runs unattended. On daemon/reboot restore the tile resumes its own
+  session via `chat --resume-id <id>` (resolved from `chat --list-sessions`), falling back to
+  cwd-scoped `--resume`. The screen-scrape detector gains a `blocked` branch for kiro's approval
+  prompt so a human-driven tile awaiting consent reads "needs your input" instead of idle. `hive agent
+  detect` now finds it (probing the `kiro-cli` binary; the agent id stays `kiro`), and `--assignee
+  kiro` resolves as an agent.
+- **Canonical issue types (Epic → Feature → Story/Bug/Support/Spike/Task).** Issues now carry a
+  first-class `type` labeling their work-item kind / hierarchy level, independent of the Kanban
+  state. Types map to/from Azure DevOps work item types on sync (Epic, Feature, User Story, Bug,
+  `support`→"Apoio", Spike, Task), overridable per-org via a `typeMap` in the sync config. Creating
+  or importing an issue sets its type, and the Azure work item type a push targets is derived from
+  it.
+- **Two-way comment sync with Azure DevOps.** Running a sync now mirrors comments both ways: your
+  local activity comments are posted to the linked Azure work item, and Azure comments are pulled
+  into the issue's activity log. Loop-safe — mirrored-in comments are tagged and never echoed back,
+  and a high-water mark prevents duplicate pushes on re-sync.
+- **Selective file staging in the Commit dialog.** The commit modal now lists every changed file
+  with a checkbox (plus a select-all), so you commit exactly the files you pick instead of
+  all-or-nothing. Ticking a file stages it; unticking unstages it.
+- **`AB#` task-reference autocomplete in commit messages.** Typing `AB#` (or a hive issue id) in the
+  commit Summary or Description autocompletes the workspace's issues — an Azure-linked issue suggests
+  `AB#<id> — <title>` (Azure's commit-linking syntax), a local-only issue suggests its hive id — so
+  a commit can reference the task it implements.
+- **Per-issue preferred frame + agent.** Issues can remember a canvas frame and an agent to prefill
+  the "Work on this" flow (backend model; UI wiring follows).
+
+- **Link a running agent to a task (both directions).** A terminal/agent tile now has a "link to
+  task" button in its header: pick a hivemind issue and the tile shows the issue id as a chip. The
+  reverse works too — the issue peek has an **Agents** section listing every agent linked to that
+  issue with its live status (working / needs-you / idle / exited), a focus button, and an
+  "Associate a running terminal" picker to attach an already-running agent. The association persists
+  across reloads.
+- **Visible remote (Azure) id.** The issue peek header and the board cards/list now show the linked
+  Azure work item as `AB#<id>` (a link to the work item, with the remote board state), so the
+  tracker reference is visible at a glance.
+- **Per-issue "Sync to Azure" button.** The issue peek has a Sync button that pulls the latest from
+  Azure and pushes your local edits + comments — a manual, explicit sync per issue (no auto-push).
+- **New-issue Area picker + canonical Type.** When a board is synced, the New-issue modal's Area
+  (board) field is a dropdown populated from the tracker's area paths (falling back to free text).
+  The Type picker now uses the canonical hive types (Epic/Feature/Story/Bug/Apoio/Spike/Task), which
+  map to the Azure work item type automatically, and the Parent picker only offers valid parents for
+  the chosen type (a Story parents to a Feature, a Feature to an Epic).
+- **Work launcher modal.** Clicking "Work on this" now opens a modal to choose the agent
+  (claude/codex/kiro/…), the frame (repo or worktree) to spawn into, and an optional extra prompt —
+  prefilled from the issue's preferred agent. The spawned agent is auto-linked to the issue.
+- **Epic → Feature → Story hierarchy from Azure.** Sync now imports the work-item parent/child
+  hierarchy: an item's Azure parent is mapped to the local issue's `parent`, reconstructing the tree
+  locally. Available in the MCP tools too — `hive_create_issue` / `hive_update_issue` accept `type`.
+
 ## [1.17.0-flow.2] — 2026-08-27
 
 ### Added

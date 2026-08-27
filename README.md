@@ -6,7 +6,7 @@
 
 **A canvas-per-project mission control for AI coding agents.**
 
-Drop `claude`, `codex`, `gemini`, `opencode`, or `pi` into real workspaces where they can
+Drop `claude`, `codex`, `gemini`, `opencode`, `pi`, `droid`, or `kiro` into real workspaces where they can
 read issues, update status, mark acceptance criteria, and comment their own
 progress — through a Kanban PM model that's just plain markdown on disk.
 
@@ -192,7 +192,6 @@ spawned agent, so these tools "just work" from inside a tile and return a clear
 | `hive_approve` | Answer a **supervised** worker's tool-permission request (`allow`/`deny`/`always`/`never`) — see below. |
 | `hive_list_tiles` / `hive_list_frames` | List tiles **grouped by frame** (with live status), or list the frames themselves. Filter by `frame`. |
 | `hive_focus` / `hive_close_tile` | Bring a tile into view, or shut a worker down. |
-| `hive_connect` / `hive_disconnect` | Pipe one agent's finished-turn replies into another's input — chain workers (animated data-flow edge). |
 | `hive_open_review` / `hive_report` | Open a plan in the review tile and block for human approve/deny; or push a result back to the agent that spawned you. |
 
 **Supervised approvals.** Spawn with `supervise` and the worker stops escalating
@@ -211,7 +210,7 @@ spawn|send|keys|read|approve|list|frames|focus|close|connect`.
 | | |
 |---|---|
 | **Canvas-per-project** | One infinite [xyflow](https://reactflow.dev) canvas per repo. Frames bind to a workspace path, so multiple repos coexist on one screen, each with its own auto-assigned color. |
-| **Pluggable agents** | `claude` / `codex` / `gemini` / `opencode` / `pi` each run in their own WebGL-accelerated xterm tile. Agents are an extensible registry — adding one is a single entry. Live status (idle / working / waiting / done) is detected from the command and shown on the frame header. |
+| **Pluggable agents** | `claude` / `codex` / `gemini` / `opencode` / `pi` / `droid` / `kiro` each run in their own WebGL-accelerated xterm tile. Agents are an extensible registry — adding one is a single entry. Live status (idle / working / waiting / done) is detected from the command and shown on the frame header. |
 | **PM you can `cat`** | Issues, acceptance criteria, cycles, and an activity log are markdown + YAML frontmatter under `.hivemind/`. No DB, no API. |
 | **MCP integration** | `.mcp.json` autowires a stdio MCP server so agents can `get_issue`, `set_state`, `add_comment`, `mark_acceptance`, … from inside their tile. |
 | **Live diff review** | A Pierre-backed diff tile: split / unified, a changed-files sidebar with per-file **reviewed** checks, multi-line comments, and **send-to-agent** for any comment or selection. |
@@ -329,7 +328,8 @@ host**, then spawn an agent per frame. Several agents work side by side — each
 to its own directory, branch, and issues — and you watch every diff update live.
 
 **Which agents are supported?**
-`claude` (Claude Code), `codex`, `gemini`, `opencode`, and `pi` out of the box. The agent
+`claude` (Claude Code), `codex`, `gemini`, `opencode`, `pi`, `droid` (Factory), and `kiro` (Kiro CLI)
+out of the box. The agent
 registry takes one entry per CLI, so any terminal-native coding agent can be added.
 
 **Is this like tmux for AI agents?**
