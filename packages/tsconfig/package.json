@@ -1,6 +1,6 @@
 {
   "name": "@hivemind/tsconfig",
-  "version": "1.17.0-flow.3",
+  "version": "1.18.0-flow.1",
   "private": true,
   "files": ["base.json"]
 }

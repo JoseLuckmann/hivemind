@@ -7,6 +7,8 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+## [1.18.0-flow.1] — 2026-08-27
+
 ### Added
 
 - **Archive issues.** An issue can be *archived* — put away without deleting it. It keeps its state
@@ -1076,7 +1078,8 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 - **install.sh** — single script for both fresh install and in-place upgrade. Downloads prebuilt binaries from GitHub Releases by default; `--dev` flag clones and builds from source.
 - **GitHub Actions** — `release.yml` (tag-driven build + publish on `v*.*.*`), `ci.yml` (typecheck + build + unit tests on every push / PR).
 
-[Unreleased]: https://github.com/dip497/hivemind/compare/v1.17.0-flow.3...HEAD
+[Unreleased]: https://github.com/dip497/hivemind/compare/v1.18.0-flow.1...HEAD
+[1.18.0-flow.1]: https://github.com/dip497/hivemind/releases/tag/v1.18.0-flow.1
 [1.17.0-flow.3]: https://github.com/dip497/hivemind/releases/tag/v1.17.0-flow.3
 [1.17.0-flow.2]: https://github.com/dip497/hivemind/releases/tag/v1.17.0-flow.2
 [1.17.0-flow.1]: https://github.com/dip497/hivemind/releases/tag/v1.17.0-flow.1
