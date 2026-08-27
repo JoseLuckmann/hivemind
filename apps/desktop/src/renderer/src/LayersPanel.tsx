@@ -15,7 +15,7 @@ import { subscribeStatus, type TileStatusKind } from "./agent-status-bus";
 import { AgentIcon } from "./agents";
 import { FrameRailMenu, type FrameActions } from "./FrameRailMenu";
 
-export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file";
+export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file" | "explorer";
 
 export interface LayerTile {
   id: string;
@@ -98,6 +98,8 @@ const KIND_GLYPH: Record<LayerKind, string> = {
   planReview: "▤",
   workbench: "▥",
   file: "≡",
+  // Rendered via the Folder lucide icon below (same reasoning as browser).
+  explorer: "",
 };
 
 /** Workspace identity glyph, keyed to the frame color — no boxed chip (the solid
@@ -309,7 +311,9 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
             ? <AgentIcon id={t.agent ?? "claude"} size={14} />
             : t.kind === "browser"
               ? <Globe size={12} aria-hidden />
-              : KIND_GLYPH[t.kind]}
+              : t.kind === "explorer"
+                ? <Folder size={12} aria-hidden />
+                : KIND_GLYPH[t.kind]}
         </span>
         {/* Name first, so every row's text starts at the same x. The badge used to
             lead, which pushed each name right by however wide its status happened

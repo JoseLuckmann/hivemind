@@ -705,6 +705,23 @@ ipcMain.handle("pickProjectFolder", async () => {
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
 });
+// Same dialog as pickProjectFolder, generalized for any "choose a folder"
+// UI (currently the File Explorer tile's "change folder") — neutral title,
+// no createDirectory (you're pointing at an existing folder, not making one).
+ipcMain.handle("pickFolder", async (_e, opts?: { title?: string; defaultPath?: string }) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: opts?.title ?? "Choose folder",
+    defaultPath: opts?.defaultPath,
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+// Explicitly (re)start a watcher on an arbitrary path — see HiveIpc.watchPath.
+// watchRepo is idempotent per (path, webContents), so calling this repeatedly
+// (e.g. on every File Explorer mount) is safe.
+ipcMain.handle("watchPath", wrap((e, p: string) => { watchRepo(p, e.sender); }));
 // Initialize a .hivemind/ workspace in `dir` (no terminal needed). Mirrors
 // `hive init --prefix`. Returns the new root path. Renderer then re-resolves
 // the project so the New-issue button + board light up.

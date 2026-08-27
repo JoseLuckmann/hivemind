@@ -174,15 +174,6 @@ export function FrameRailMenu({
             <Item key={kind} icon={<Icon size={13} />} label={label} onClick={() => { actions.onOpenInFrame(fid, kind); close(); }} />
           ))}
           <Item icon={<FileText size={13} />} label="File…" onClick={() => { actions.onOpenFilePicker(fid); close(); }} />
-          {([
-            ["shell", "Terminal"],
-            ["tree", "Editor"],
-            ["diff", "Diff"],
-            ["issues", "Issues"],
-            ["browser", "Browser"],
-          ] as const).map(([kind, label]) => (
-            <Item key={kind} icon={<Plus size={13} />} label={label} onClick={() => { actions.onOpenInFrame(fid, kind); close(); }} />
-          ))}
         </SubmenuRow>
 
         <SubmenuRow icon={<GitCommitHorizontal size={13} />} label="Git" open={sub === "git"} onOpen={() => setSub("git")}>
