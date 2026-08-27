@@ -7,6 +7,60 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+### Added
+
+- **Archive issues.** An issue can be *archived* — put away without deleting it. It keeps its state
+  and file but drops off the board by default; a **Show archived** toggle in the issues filter bar
+  reveals them, and the issue peek gains an Archive/Unarchive button (with an "archived" badge). The
+  flag lives as `archived:` in the markdown frontmatter and is dropped when false (byte-stable files).
+- **Create issues OFFLINE.** The New-issue modal (on a synced board) has an **Offline (don't sync)**
+  toggle: an offline issue is kept entirely out of external-tracker sync — never pushed upstream,
+  never pulled from — so it stays a local-only planning item. Existing issues can be toggled online/
+  offline from the peek's remote-board panel. Backed by an `offline:` frontmatter flag the sync engine
+  skips.
+- **Finished/closed upstream items land in Done.** External-tracker sync now recognizes *terminal*
+  remote states (Azure DevOps Done/Closed/Resolved/Completed → **Done**, Removed → **Cancelled**) and
+  syncs them onto the local column — a work item that's finished/archived upstream comes across in the
+  right column instead of lingering, even on the first sync of an already-closed item. Non-terminal
+  remote states stay decoupled from the local Kanban as before.
+- **Agent status on issue cards.** A board/list card now surfaces the live status of the agents
+  linked to that issue, discreetly: it **pulses orange** when a linked agent needs you, shows a small
+  animated dot while one is **working**, and gets a **lavender border** when an agent finished a turn
+  you haven't looked at yet (cleared once you open the issue). Idle/seen shows nothing.
+- **Blank scratch note tiles.** A new file tile can start empty — jot something on the canvas and
+  save it to a workspace path only if you want to. Create one from the tool island's "New file"
+  button, the canvas right-click menu, or a frame's **+ Add** menu. The note is treated as
+  **markdown**: an Edit ⇄ Preview toggle renders it (headings, lists, links, code, mermaid) with the
+  same viewer the editor uses — so it formats even before it has a `.md` file, and saving to a `.md`
+  path keeps that formatting.
+- **Image reference tiles.** A file tile bound to an image (png/jpg/gif/webp/svg/…) renders the
+  picture inline (contained, zoomable) instead of raw bytes — a quick visual reference on the canvas.
+- **Reparent tiles from the Layers panel.** Drag a tile row onto another workspace's header (or onto
+  a loose tile to move it out to the canvas) to move it into that frame without touching the canvas —
+  reorganize deep trees straight from the rail. Reordering within a bucket and reordering top-level
+  frames are now wired on the canvas rail too.
+
+### Changed
+
+- **Layers panel no longer shows a "Canvas" folder.** Tiles that aren't in any frame are still listed
+  (and still accept a reparent drop), but the named "Canvas" pseudo-folder header is gone — it was
+  noise in the rail.
+- **Tool island cleanup.** The floating tool island's **Explorer** button now opens the file explorer
+  tile (it previously opened the code editor); a dedicated **Editor** button was added, **Issues** was
+  renamed **Tasks**, and a **New file** button was added. The documented number hotkeys (1–7) are
+  unchanged; key `3` opens the explorer.
+- **More discoverable "add tile" affordance.** A frame's tiny **+** header icon is now a labeled
+  **+ Add** button, and both it and the canvas right-click menu group their entries as
+  Agent / Tool / File.
+
+### Fixed
+
+- **Flaky snapshot flush on graceful stop.** `SessionManager.flushAll()` now also awaits any snapshot
+  that was already mid-write (a debounced write whose xterm drain callback hadn't delivered yet),
+  instead of no-op'ing because the session's `dirty` flag was already cleared. This removes a race
+  where a snapshot in progress at shutdown could be missed — surfaced as an intermittent failure in
+  the claude-resume restore integration test.
+
 ## [1.17.0-flow.3] — 2026-08-27
 
 ### Changed

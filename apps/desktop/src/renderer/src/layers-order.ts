@@ -111,3 +111,22 @@ export function reorder<T>(ids: readonly T[], dragId: T, beforeId: T | null): T[
   const at = without.indexOf(beforeId);
   return [...without.slice(0, at), dragId, ...without.slice(at)];
 }
+
+/**
+ * Compute the destination bucket's new id order when a tile is REPARENTED into
+ * it (moved from another frame / the loose canvas). The moved id lands
+ * immediately BEFORE `beforeId`, or appended when `beforeId` is null/absent.
+ * Any pre-existing copy of `movedId` in `destIds` is removed first (defensive —
+ * a reparent shouldn't duplicate). Pure; returns a new array.
+ *
+ *   placeInto(["a","b"], "x", "b")  → ["a","x","b"]
+ *   placeInto(["a","b"], "x", null) → ["a","b","x"]
+ */
+export function placeInto<T>(destIds: readonly T[], movedId: T, beforeId: T | null): T[] {
+  const without = destIds.filter((id) => id !== movedId);
+  if (beforeId == null || beforeId === movedId || !without.includes(beforeId)) {
+    return [...without, movedId];
+  }
+  const at = without.indexOf(beforeId);
+  return [...without.slice(0, at), movedId, ...without.slice(at)];
+}

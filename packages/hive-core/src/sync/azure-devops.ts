@@ -450,6 +450,23 @@ export const azureDevOpsProvider: SyncProvider<AzureDevOpsConfig> = {
     return out;
   },
 
+  isTerminalRemoteState(config, remoteState) {
+    const name = remoteState.trim().toLowerCase();
+    if (!name) return null;
+    const map = stateMapFor(config);
+    // The configured names for the two terminal hivemind states take priority —
+    // an org that renamed "Done"/"Removed" still resolves correctly.
+    if (name === map.cancelled.trim().toLowerCase()) return "cancelled";
+    if (name === map.done.trim().toLowerCase()) return "done";
+    // Process-agnostic terminal names Azure uses across Agile/Scrum/CMMI/Basic.
+    // "Removed" is a cancellation; the rest are completions → Done.
+    const CANCELLED = new Set(["removed"]);
+    const DONE = new Set(["done", "closed", "resolved", "completed"]);
+    if (CANCELLED.has(name)) return "cancelled";
+    if (DONE.has(name)) return "done";
+    return null;
+  },
+
   toIssueFields(remote, config) {
     const reverse = reverseStateMapFor(config);
     return {

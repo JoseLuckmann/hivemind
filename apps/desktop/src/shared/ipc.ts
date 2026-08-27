@@ -263,6 +263,10 @@ export interface HiveIpc {
       /** External-tracker hint: create the mirror on this board/type on the
        *  next sync. Mirrors core's `CreateIssueOpts.sync`. */
       sync?: { provider: string; workItemType?: string; areaPath?: string };
+      /** Create OFFLINE — keep this issue out of tracker sync entirely (sets the
+       *  `offline` flag and suppresses the pending sync link). Mirrors core's
+       *  `CreateIssueOpts.offline`. */
+      offline?: boolean;
     }
   ): Promise<Issue>;
   updateIssue(root: string, id: string, patch: IssuePatch): Promise<Issue>;
@@ -356,6 +360,9 @@ export interface HiveIpc {
   fileRead(repoPath: string, relPath: string): Promise<string>;
   /** Write UTF-8 contents to a repo-relative file. Rejects path traversal. */
   fileWrite(repoPath: string, relPath: string, contents: string): Promise<void>;
+  /** Read a repo-relative BINARY file as base64 (for image reference tiles).
+   *  Rejects path traversal outside repoPath; supports remote (SFTP) repos. */
+  fileReadBase64(repoPath: string, relPath: string): Promise<string>;
   /** Open a path clicked in the terminal with the OS default app (xdg-open).
    *  Resolves relatives against `cwd`; must exist; refuses `.desktop` + remote. */
   openPathInApp(cwd: string, target: string): Promise<{ ok: boolean; error?: string }>;

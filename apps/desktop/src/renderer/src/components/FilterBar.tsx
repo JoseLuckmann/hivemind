@@ -14,6 +14,10 @@ export interface Filters {
   types: Set<string>;
   /** When true, BoardView/ListView render the Cancelled column/group. */
   showCancelled: boolean;
+  /** When true, ARCHIVED issues are shown; by default they're hidden (an
+   *  archived issue is "put away" — it keeps its state but drops off the board
+   *  until you opt to see it). */
+  showArchived: boolean;
 }
 
 export const emptyFilters = (): Filters => ({
@@ -23,6 +27,7 @@ export const emptyFilters = (): Filters => ({
   assignees: new Set(),
   types: new Set(),
   showCancelled: false,
+  showArchived: false,
 });
 
 /** The external work item type an issue is, from its sync link (first link that
@@ -34,6 +39,9 @@ export function issueWorkItemType(i: IssueSummary): string | undefined {
 export function applyFilters(issues: IssueSummary[], f: Filters): IssueSummary[] {
   const q = f.q.trim().toLowerCase();
   return issues.filter((i) => {
+    // Archived issues are hidden unless explicitly shown — they keep their state
+    // but are "put away" off the board.
+    if (i.archived && !f.showArchived) return false;
     if (f.states.size > 0 && !f.states.has(i.state)) return false;
     if (f.labels.size > 0 && !i.labels.some((l) => f.labels.has(l))) return false;
     if (f.assignees.size > 0 && !(i.assignee && f.assignees.has(i.assignee.id))) return false;
@@ -164,7 +172,18 @@ export function FilterBar({
         >
           {filters.showCancelled ? "Hide cancelled" : "Show cancelled"}
         </button>
-        {(filters.states.size + filters.labels.size + filters.assignees.size + filters.types.size > 0 || filters.q || filters.showCancelled) && (
+        <button
+          onClick={() => setField("showArchived", !filters.showArchived)}
+          title={filters.showArchived ? "Hide archived" : "Show archived"}
+          className={`text-[11px] px-1.5 py-1 rounded-md border transition-colors cursor-pointer ${
+            filters.showArchived
+              ? "bg-[var(--color-bg4)] border-[var(--color-line2)] text-[var(--color-fg)]"
+              : "border-transparent text-[var(--color-fg3)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)]"
+          }`}
+        >
+          {filters.showArchived ? "Hide archived" : "Show archived"}
+        </button>
+        {(filters.states.size + filters.labels.size + filters.assignees.size + filters.types.size > 0 || filters.q || filters.showCancelled || filters.showArchived) && (
           <button
             onClick={() => onChange(emptyFilters())}
             className="text-[11px] text-[var(--color-fg2)] hover:text-[var(--color-fg)] px-1.5 py-1 rounded-md cursor-pointer"

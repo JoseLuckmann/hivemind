@@ -86,6 +86,13 @@ export async function runSync<TConfig>(
 
   const summaries = await listIssues(root);
   for (const summary of summaries) {
+    // OFFLINE issues are deliberately kept out of sync — never pushed, pulled,
+    // or matched to a remote item. Skip before any link handling so an offline
+    // issue that happens to carry a stale link is still left untouched.
+    if (summary.offline) {
+      report.skippedLocalOnly++;
+      continue;
+    }
     const link = linkFor(summary, provider.id);
     try {
       if (!link) {
@@ -130,6 +137,22 @@ export async function runSync<TConfig>(
       // Always refresh the recorded remote state (display-only) even when
       // nothing else changed, so the card shows where Azure currently sits.
       if (!remoteChanged && !localChanged) {
+        // Even with no field/rev change, reconcile a TERMINAL remote state onto
+        // the local column: an item that was already Done/Closed/Removed upstream
+        // when this feature (or the link) came online must still land in the
+        // local Done/Cancelled column — not just newly-transitioned ones. Cheap
+        // and idempotent: updateIssue only writes when the state actually differs.
+        const terminal = provider.isTerminalRemoteState?.(config, remote.state) ?? null;
+        if (terminal && issue.state !== terminal) {
+          await updateIssue(
+            root,
+            summary.id,
+            { state: terminal },
+            "sync",
+            `state → ${terminal} (remote ${remote.state} is terminal in ${provider.label})`,
+          );
+          report.pulled++;
+        }
         if (remote.state && remote.state !== link.remoteState) {
           await touchRemoteState(root, provider.id, summary.id, remote);
         }
@@ -355,10 +378,17 @@ async function pull<TConfig>(
   remote: RemoteItem,
 ): Promise<void> {
   const fields = provider.toIssueFields(remote, config);
+  const patch = toPatch(fields);
+  // Terminal remote state is the ONE exception to the state-decoupling rule: a
+  // remote item that's Done/Closed/Resolved/Completed (or Removed → cancelled)
+  // pulls its local counterpart into Done/Cancelled, so a finished/archived
+  // upstream task lands in the right column instead of lingering in the local
+  // board. Non-terminal states stay decoupled (see toPatch / hashSyncFields).
+  const terminal = provider.isTerminalRemoteState?.(config, remote.state) ?? null;
   const updated = await updateIssue(
     root,
     id,
-    toPatch(fields),
+    terminal ? { ...patch, state: terminal } : patch,
     "sync",
     `pulled from ${provider.label} #${remote.externalId}`,
   );
@@ -382,10 +412,14 @@ async function createLocal<TConfig>(
   remote: RemoteItem,
 ): Promise<void> {
   const fields = provider.toIssueFields(remote, config);
+  // A remote item that's already in a terminal state (Done/Closed/…/Removed)
+  // should be CREATED locally in Done/Cancelled — not the reverse-map fallback,
+  // which lands unmapped terminal names (e.g. "Closed"/"Resolved") in backlog.
+  const terminal = provider.isTerminalRemoteState?.(config, remote.state) ?? null;
   const issue = await createIssue(root, {
     title: fields.title,
     description: fields.description,
-    state: fields.state,
+    state: terminal ?? fields.state,
     type: fields.type,
     labels: fields.labels,
     assignee: fields.assignee ? { type: "member", id: fields.assignee } : null,

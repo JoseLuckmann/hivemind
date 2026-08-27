@@ -101,6 +101,9 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
   const [labels, setLabels] = useState<string[]>([]);
   const [assignee, setAssignee] = useState<Assignee | null>(null);
   const [parent, setParent] = useState<string | null>(null);
+  // OFFLINE — keep this issue out of tracker sync entirely. Only meaningful on a
+  // synced board (an unsynced board is local-only anyway).
+  const [offline, setOffline] = useState(false);
 
   // Parent candidates respect the type hierarchy: a new issue may only parent
   // to an issue of a STRICTLY higher level (a Story→Feature, a Feature→Epic).
@@ -136,6 +139,7 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
       setLabels([]);
       setAssignee(null);
       setParent(null);
+      setOffline(false);
     }
   }, [open]);
 
@@ -157,16 +161,18 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
           labels: labels.length ? labels : undefined,
           assignee: assignee ?? undefined,
           parent: parent ?? undefined,
-          // Only send a tracker hint when this board is synced — otherwise the
-          // issue is local-only and needs no provider/area. The Azure work item
-          // type is derived from the canonical hive `type` on push (see the
-          // provider's azureTypeForIssue), so no work-item-type hint is needed.
-          sync: syncProviderId
+          // Only send a tracker hint when this board is synced AND the issue
+          // isn't OFFLINE — otherwise the issue is local-only and needs no
+          // provider/area. The Azure work item type is derived from the
+          // canonical hive `type` on push (see the provider's azureTypeForIssue),
+          // so no work-item-type hint is needed.
+          sync: syncProviderId && !offline
             ? {
                 provider: syncProviderId,
                 areaPath: areaPath.trim() || undefined,
               }
             : undefined,
+          offline: offline || undefined,
         },
       },
       {
@@ -270,6 +276,7 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
                     onChange={(e) => setAreaPath(e.target.value)}
                     className={inputCls}
                     aria-label="Area path"
+                    disabled={offline}
                   >
                     <option value="">{defaultArea || "(project default)"}</option>
                     {syncAreas.areas.map((a) => (
@@ -283,9 +290,32 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
                     placeholder={defaultArea || "Project\\Team"}
                     className={inputCls}
                     aria-label="Area path"
+                    disabled={offline}
                   />
                 )}
               </Field>
+            )}
+
+            {/* OFFLINE — keep this issue out of tracker sync. Only offered on a
+                synced board (an unsynced board is local-only by definition, so
+                the toggle would be a no-op). Checked ⇒ no remote mirror is ever
+                created and the sync engine skips it entirely. */}
+            {syncProviderId && (
+              <label className="flex items-start gap-2.5 rounded-lg border border-[var(--color-line2)] bg-[var(--color-bg)] px-3 py-2.5 cursor-pointer hm-soft">
+                <input
+                  type="checkbox"
+                  checked={offline}
+                  onChange={(e) => setOffline(e.target.checked)}
+                  className="mt-0.5 size-3.5 accent-[var(--color-brand)] cursor-pointer"
+                  aria-label="Create offline (do not sync)"
+                />
+                <span className="grid gap-0.5">
+                  <span className="text-[12px] font-medium text-[var(--color-fg)]">Offline (don't sync)</span>
+                  <span className="text-[11px] text-[var(--color-fg2)] leading-snug">
+                    Keep this issue local — it won't be pushed to {syncProviderId} or pulled from it.
+                  </span>
+                </span>
+              </label>
             )}
 
             <Field label="Labels">

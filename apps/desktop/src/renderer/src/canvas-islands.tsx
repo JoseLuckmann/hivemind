@@ -7,12 +7,14 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
+import { FolderTree, FileCode2, FilePlus2 } from "lucide-react";
 import { AGENTS, AgentIcon, agentById } from "./agents";
 
-/** Top-center tool island — spawn terminal/agent/editor/diff/issues/frame. */
+/** Top-center tool island — spawn terminal/agent/explorer/editor/diff/tasks/file/frame. */
 export function ToolIsland({
   repoPath,
   onToggle,
+  onNewFile,
   agentSel,
   onAgentChange,
   onSpawnAgent,
@@ -24,7 +26,9 @@ export function ToolIsland({
   upgrading,
 }: {
   repoPath: string | null;
-  onToggle: (k: "tree" | "shell" | "diff" | "issues") => void;
+  onToggle: (k: "explorer" | "editor" | "shell" | "diff" | "issues") => void;
+  /** Create a blank scratch file tile (jot notes; save later if wanted). */
+  onNewFile: () => void;
   /** Currently-selected agent id (which the spawn button creates). */
   agentSel: string;
   onAgentChange: (id: string) => void;
@@ -84,12 +88,23 @@ export function ToolIsland({
         )}
       </div>
       <div className="mx-0.5 h-5 w-px bg-[var(--color-line2)]" aria-hidden />
-      <ToolButton label="Explorer" hint="3" disabled={!repoPath} onClick={() => onToggle("tree")}
-        icon={<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 4.5C2 3.7 2.7 3 3.5 3h3l1.5 1.5h4.5c.8 0 1.5.7 1.5 1.5v5.5c0 .8-.7 1.5-1.5 1.5h-9C2.7 13 2 12.3 2 11.5v-7Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>} />
+      {/* Explorer — opens the file EXPLORER tile (folder tree), not the editor.
+          (It used to map to the editor tile, which was the wrong destination.) */}
+      <ToolButton label="Explorer" hint="3" disabled={!repoPath} onClick={() => onToggle("explorer")}
+        icon={<FolderTree size={15} />} />
+      {/* Editor — a tabbed code editor tile (was the old "Explorer" behaviour).
+          Mouse-only (no number hint) so the documented 1-7 row is unchanged. */}
+      <ToolButton label="Editor" disabled={!repoPath} onClick={() => onToggle("editor")}
+        icon={<FileCode2 size={15} />} />
       <ToolButton label="Diff" hint="4" disabled={!repoPath} onClick={() => onToggle("diff")}
         icon={<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="4.5" cy="4" r="1.7"/><circle cx="11.5" cy="12" r="1.7"/><path d="M4.5 5.7v2.8a2 2 0 0 0 2 2H9"/><path d="M11.5 10.3V7.5a2 2 0 0 0-2-2H7"/></svg>} />
-      <ToolButton label="Issues" hint="5" disabled={!repoPath} onClick={() => onToggle("issues")}
+      {/* Tasks — the issues/kanban board tile. spawnInto goes straight to the one
+          board when a single frame is in play, else it pops the frame picker. */}
+      <ToolButton label="Tasks" hint="5" disabled={!repoPath} onClick={() => onToggle("issues")}
         icon={<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2.5 4.3l1.1 1.1 1.8-1.9M2.5 9.3l1.1 1.1 1.8-1.9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M7.5 4.6h6M7.5 9.6h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>} />
+      {/* File — a blank scratch note tile (jot something, save it if you want). */}
+      <ToolButton label="New file" onClick={onNewFile}
+        icon={<FilePlus2 size={15} />} />
       <div className="mx-0.5 h-5 w-px bg-[var(--color-line2)]" aria-hidden />
       <ToolButton label="Frame" hint="6" onClick={onFrame}
         icon={<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M5 2v12M11 2v12M2 5h12M2 11h12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>} />
@@ -133,7 +148,7 @@ function ToolButton({
   onClick,
 }: {
   label: string;
-  hint: string;
+  hint?: string;
   icon: React.ReactNode;
   disabled?: boolean;
   onClick: () => void;
@@ -142,7 +157,7 @@ function ToolButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      title={disabled ? `${label} — needs a repo` : `${label}  (${hint})`}
+      title={disabled ? `${label} — needs a repo` : hint ? `${label}  (${hint})` : label}
       className={`relative grid place-items-center size-9 rounded-lg transition-colors cursor-pointer ${
         // These are spawn/toggle ACTIONS, not stateful toggles — showing them
         // "selected" because a tile of that kind happens to be open was just
@@ -153,7 +168,7 @@ function ToolButton({
       }`}
     >
       {icon}
-      <kbd className="absolute bottom-0.5 right-1 font-mono text-[8px] leading-none opacity-60">{hint}</kbd>
+      {hint && <kbd className="absolute bottom-0.5 right-1 font-mono text-[8px] leading-none opacity-60">{hint}</kbd>}
     </button>
   );
 }

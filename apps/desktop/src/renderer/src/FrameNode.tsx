@@ -8,7 +8,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { GitBranch, FolderGit2, Plus, LayoutGrid, Server, GitCommitHorizontal, FileText } from "lucide-react";
+import { GitBranch, FolderGit2, Plus, LayoutGrid, Server, GitCommitHorizontal, FileText, FilePlus2 } from "lucide-react";
 import { subscribeStatus, type TileStatusKind } from "./agent-status-bus";
 import { WorktreePicker } from "./WorktreePicker";
 import { useGitBranch } from "./queries";
@@ -398,14 +398,15 @@ export function FrameNode({ id, data, selected }: { id: string; data: FrameNodeD
         <button
           ref={addBtnRef}
           onClick={() => setShowAdd((x) => !x)}
-          className="size-4 grid place-items-center rounded text-[var(--color-fg2)] hover:bg-[var(--color-bg3)] hover:text-[var(--color-fg)]"
-          title="Open a tile in this zone (terminal / Claude / editor / diff / issues)"
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-fg)] bg-[var(--color-bg3)] hover:bg-[var(--color-bg4)] shrink-0"
+          title="Add a tile to this workspace — agent, terminal, editor, explorer, diff, tasks, file"
           aria-label="add tile"
         >
           <Plus size={12} />
+          Add
         </button>
         <AnchoredMenu anchor={addBtnRef.current} open={showAdd} onClose={() => setShowAdd(false)}>
-          <div className="px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-fg3)] font-semibold">open in zone</div>
+          <div className="px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-fg3)] font-semibold">agent</div>
           {/* Agents come from the registry — adding one there adds it here. */}
           {AGENTS.filter((a) => a.enabled).map((a) => (
             <button
@@ -420,16 +421,7 @@ export function FrameNode({ id, data, selected }: { id: string; data: FrameNodeD
               {a.label}
             </button>
           ))}
-          <button
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent("hivemind:frame-open-file", { detail: { frameId: data.id } }));
-              setShowAdd(false);
-            }}
-            className="flex items-center gap-2 text-left px-2 py-1 rounded text-[11px] text-[var(--color-fg)] hover:bg-[var(--color-bg4)] w-full"
-          >
-            <FileText size={13} className="shrink-0 text-[var(--color-fg3)]" />
-            File…
-          </button>
+          <div className="px-2 pt-1.5 pb-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-fg3)] font-semibold">tool</div>
           {OPEN_KINDS.map(({ kind, label, icon: Icon }) => (
             <button
               key={kind}
@@ -443,6 +435,27 @@ export function FrameNode({ id, data, selected }: { id: string; data: FrameNodeD
               {label}
             </button>
           ))}
+          <div className="px-2 pt-1.5 pb-1 text-[9px] uppercase tracking-[0.12em] text-[var(--color-fg3)] font-semibold">file</div>
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("hivemind:frame-new-file", { detail: { frameId: data.id } }));
+              setShowAdd(false);
+            }}
+            className="flex items-center gap-2 text-left px-2 py-1 rounded text-[11px] text-[var(--color-fg)] hover:bg-[var(--color-bg4)] w-full"
+          >
+            <FilePlus2 size={13} className="shrink-0 text-[var(--color-fg3)]" />
+            New file (scratch)
+          </button>
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("hivemind:frame-open-file", { detail: { frameId: data.id } }));
+              setShowAdd(false);
+            }}
+            className="flex items-center gap-2 text-left px-2 py-1 rounded text-[11px] text-[var(--color-fg)] hover:bg-[var(--color-bg4)] w-full"
+          >
+            <FileText size={13} className="shrink-0 text-[var(--color-fg3)]" />
+            Open file…
+          </button>
         </AnchoredMenu>
         <button
           ref={arrangeBtnRef}

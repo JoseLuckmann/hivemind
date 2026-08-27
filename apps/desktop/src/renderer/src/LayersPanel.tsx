@@ -14,7 +14,7 @@ import { Layers, ChevronRight, ChevronDown, GitBranch, Server, Folder, FolderOpe
 import { subscribeStatus, type TileStatusKind } from "./agent-status-bus";
 import { AgentIcon } from "./agents";
 import { FrameRailMenu, type FrameActions } from "./FrameRailMenu";
-import { LOOSE_BUCKET, reorder } from "./layers-order";
+import { LOOSE_BUCKET, reorder, placeInto } from "./layers-order";
 
 export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file" | "explorer";
 
@@ -60,6 +60,13 @@ interface Props {
    *  top-level frame sequence. */
   onReorderTiles?: (bucket: string, orderedIds: string[]) => void;
   onReorderFrames?: (orderedIds: string[]) => void;
+  /** Reparent a tile into a different frame (or the loose "Canvas" bucket) from
+   *  the panel — no canvas drag needed. `toBucket` is a frame id or LOOSE_BUCKET;
+   *  `orderedIds` is the destination bucket's new full sequence with the moved
+   *  tile already in place. The host moves the tile between frames (frameOf) and
+   *  persists the new order. Optional so the panel still renders without a host
+   *  that wires it (tests / read-only rails). */
+  onReparentTile?: (tileId: string, toBucket: string, orderedIds: string[]) => void;
 }
 
 const STATUS_COLOR: Record<TileStatusKind, string> = {
@@ -151,7 +158,7 @@ function WorkspaceIcon({ color, remote, worktree, collapsed }: { color: string; 
   );
 }
 
-export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocusFrame, frameActions, onReorderTiles, onReorderFrames }: Props) {
+export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocusFrame, frameActions, onReorderTiles, onReorderFrames, onReparentTile }: Props) {
   // Persisted: panel hidden + which frame groups are collapsed. Now that the
   // panel is DOCKED (a flex sibling, not an overlay) it no longer occludes any
   // tile, so it defaults to SHOWN; collapsing leaves a narrow icon rail. The
@@ -199,7 +206,7 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
   // from the live arrays at drop time via the pure `reorder` helper, so this
   // state only drives the visual affordance. Reorder is enabled only when the
   // matching callback is wired (read-only otherwise).
-  const canDragTiles = !!onReorderTiles;
+  const canDragTiles = !!onReorderTiles || !!onReparentTile;
   const canDragFrames = !!onReorderFrames;
   const [drag, setDrag] = useState<
     | { type: "tile"; id: string; bucket: string }
@@ -209,14 +216,22 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const endDrag = () => { setDrag(null); setDropTarget(null); };
 
-  // Drop `drag` before `beforeId` in its bucket (or append when beforeId is
-  // null). Recomputes the bucket's live id order, applies the pure move, and
-  // fires the host callback. Cross-bucket / cross-type drops are ignored — a
-  // tile only reorders among its siblings, a frame only among top-level frames.
+  // Drop `drag` before `beforeId` in `bucket`. When the drag ORIGINATED in this
+  // bucket it's a plain reorder; when it came from ANOTHER bucket it's a
+  // reparent (move the tile into this frame / the loose canvas). Cross-bucket
+  // moves are what lets the panel reorganize the tree without touching the
+  // canvas — the host applies the frameOf change + persists the new order.
   const dropTileBefore = (bucket: string, beforeId: string | null) => {
-    if (drag?.type !== "tile" || drag.bucket !== bucket) return endDrag();
-    const liveIds = (bucket === LOOSE_BUCKET ? looseTiles : tilesOf(bucket)).map((t) => t.id);
-    onReorderTiles?.(bucket, reorder(liveIds, drag.id, beforeId));
+    if (drag?.type !== "tile") return endDrag();
+    if (drag.bucket === bucket) {
+      // Same bucket → reorder among siblings (unchanged behaviour).
+      const liveIds = (bucket === LOOSE_BUCKET ? looseTiles : tilesOf(bucket)).map((t) => t.id);
+      onReorderTiles?.(bucket, reorder(liveIds, drag.id, beforeId));
+    } else if (onReparentTile) {
+      // Cross-bucket → reparent into `bucket` at the drop point.
+      const destIds = (bucket === LOOSE_BUCKET ? looseTiles : tilesOf(bucket)).map((t) => t.id);
+      onReparentTile(drag.id, bucket, placeInto(destIds, drag.id, beforeId));
+    }
     endDrag();
   };
   const dropFrameBefore = (beforeId: string | null) => {
@@ -224,6 +239,14 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
     const liveIds = topFrames.map((f) => f.id);
     onReorderFrames?.(reorder(liveIds, drag.id, beforeId));
     endDrag();
+  };
+  // A tile-drag can target a WHOLE bucket (a frame header, or the loose "Canvas"
+  // header / empty group) → append the moved tile to the end of that bucket. Only
+  // meaningful for a cross-bucket move (reparent); a same-bucket "drop on header"
+  // is a no-op append that reorder() de-dupes to the end.
+  const dropTileIntoBucket = (bucket: string) => {
+    if (drag?.type !== "tile") return endDrag();
+    dropTileBefore(bucket, null);
   };
 
   // Live status per tile, from the shared bus (same source as frame chips).
@@ -314,10 +337,13 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
     const isPlan = t.kind === "planReview";
     const st: TileStatusKind = isPlan ? "question" : (status.get(t.id) ?? "idle");
     const sel = t.id === selectedTileId;
-    // Drop indicator: a hairline above this row while a same-bucket tile hovers
-    // over it. Only the drop TARGET row draws it; dragging its own row shows the
-    // moved-item affordance (dimmed) instead.
-    const isDropTarget = drag?.type === "tile" && drag.bucket === bucket && dropTarget === t.id && drag.id !== t.id;
+    // Drop indicator: a hairline above this row while a tile hovers over it —
+    // whether reordering (same bucket) or reparenting (a tile from another
+    // bucket landing here). Only the drop TARGET row draws it; a row dragging
+    // itself shows the moved-item affordance (dimmed) instead.
+    const canDropHere = drag?.type === "tile" && drag.id !== t.id &&
+      (drag.bucket === bucket || !!onReparentTile);
+    const isDropTarget = canDropHere && dropTarget === t.id;
     const isDragging = drag?.type === "tile" && drag.id === t.id;
     return (
       <button
@@ -332,18 +358,22 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
           e.dataTransfer.setData("text/plain", t.id);
         } : undefined}
         onDragOver={canDragTiles ? (e: ReactDragEvent) => {
-          // Only accept a tile from the SAME bucket — cross-frame moves are a
-          // canvas action, not a reorder. preventDefault marks a valid target.
-          if (drag?.type !== "tile" || drag.bucket !== bucket) return;
+          // Accept a tile from the SAME bucket (reorder) OR another bucket
+          // (reparent, when the host wired onReparentTile). preventDefault marks
+          // a valid drop target.
+          if (drag?.type !== "tile") return;
+          if (drag.bucket !== bucket && !onReparentTile) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "move";
           if (dropTarget !== t.id) setDropTarget(t.id);
         } : undefined}
         onDrop={canDragTiles ? (e: ReactDragEvent) => {
           e.preventDefault();
+          e.stopPropagation();
           // Bottom-half drop lands AFTER this row (before its next sibling, or
           // appended when it's the last) — the natural gesture for "put it below
-          // this one". Top-half lands before it.
+          // this one". Top-half lands before it. Uses the DESTINATION bucket's
+          // live siblings so a reparent computes its insert point correctly.
           const rect = e.currentTarget.getBoundingClientRect();
           const after = e.clientY - rect.top > rect.height / 2;
           const siblingIds = (bucket === LOOSE_BUCKET ? looseTiles : tilesOf(bucket)).map((x) => x.id);
@@ -437,31 +467,52 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
     const canDragThis = canDragFrames && depth === 0;
     const isFrameDropTarget = drag?.type === "frame" && dropTarget === gid && drag.id !== gid;
     const isFrameDragging = drag?.type === "frame" && drag.id === gid;
+    // A tile dragged from another bucket can be dropped onto this frame's HEADER
+    // to reparent it into the frame (appended to the end). Highlight the header
+    // when such a tile is hovering.
+    const isTileReparentTarget = drag?.type === "tile" && drag.bucket !== gid && !!onReparentTile && dropTarget === `bucket:${gid}`;
     return (
       <div key={gid} className={depth === 0 ? "mt-1.5 first:mt-1" : ""}>
         <div
           className="group/grp flex items-center gap-0.5 h-8 pr-2 mx-2 rounded-lg hover:bg-[var(--color-bg3)] transition-colors"
           style={{
             paddingLeft: depth * 14,
-            ...(isFrameDropTarget ? { boxShadow: "inset 0 2px 0 0 var(--color-brand)" } : {}),
+            ...(isFrameDropTarget || isTileReparentTarget ? { boxShadow: "inset 0 2px 0 0 var(--color-brand)" } : {}),
             opacity: isFrameDragging ? 0.4 : undefined,
           }}
           onContextMenu={frameActions ? (e) => { e.preventDefault(); setMenu({ frame, x: e.clientX, y: e.clientY }); } : undefined}
-          onDragOver={canDragThis ? (e) => {
-            if (drag?.type !== "frame") return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            if (dropTarget !== gid) setDropTarget(gid);
-          } : undefined}
-          onDrop={canDragThis ? (e) => {
-            e.preventDefault();
-            const rect = e.currentTarget.getBoundingClientRect();
-            const after = e.clientY - rect.top > rect.height / 2;
-            const ids = topFrames.map((f) => f.id);
-            const idx = ids.indexOf(gid);
-            dropFrameBefore(after ? (ids[idx + 1] ?? null) : gid);
-          } : undefined}
-          onDragEnd={canDragThis ? endDrag : undefined}
+          onDragOver={(e) => {
+            // A tile from another bucket → reparent into this frame (drop on the
+            // header appends). A top-level frame drag → reorder among frames.
+            if (drag?.type === "tile" && drag.bucket !== gid && onReparentTile) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (dropTarget !== `bucket:${gid}`) setDropTarget(`bucket:${gid}`);
+              return;
+            }
+            if (canDragThis && drag?.type === "frame") {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (dropTarget !== gid) setDropTarget(gid);
+            }
+          }}
+          onDrop={(e) => {
+            if (drag?.type === "tile" && drag.bucket !== gid && onReparentTile) {
+              e.preventDefault();
+              e.stopPropagation();
+              dropTileIntoBucket(gid);
+              return;
+            }
+            if (canDragThis && drag?.type === "frame") {
+              e.preventDefault();
+              const rect = e.currentTarget.getBoundingClientRect();
+              const after = e.clientY - rect.top > rect.height / 2;
+              const ids = topFrames.map((f) => f.id);
+              const idx = ids.indexOf(gid);
+              dropFrameBefore(after ? (ids[idx + 1] ?? null) : gid);
+            }
+          }}
+          onDragEnd={endDrag}
         >
           {canDragThis && (
             // Dedicated drag handle: the header already packs a chevron + a
@@ -621,16 +672,31 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
           <div className="px-3 py-2 text-[12px] text-[var(--color-fg3)]">No tiles open.</div>
         )}
         {topFrames.map((f) => renderFrameGroup(f, 0))}
+        {/* Loose tiles (no frame) live conceptually in a "Canvas" bucket, but the
+            folder header is deliberately NOT rendered — the user finds a named
+            "Canvas" pseudo-folder noise in the rail. The tiles themselves stay
+            listed (at top level) so they're still reachable/focusable, and the
+            reparent-INTO-loose drop zone is preserved by wrapping them in a thin
+            drop target that highlights on a cross-bucket tile drag. */}
         {looseTiles.length > 0 && (
-          <div className="mt-1.5">
-            <div className="flex items-center gap-2 h-8 pr-2 mx-2 pl-[26px]">
-              <span className="flex-1 flex items-center gap-2 min-w-0 text-[14px] font-medium text-[var(--color-fg2)]">
-                <FolderOpen size={15} aria-hidden className="shrink-0 text-[var(--color-fg3)]" />
-                <span className="truncate">Canvas</span>
-                <span className="ml-auto font-mono text-[11px] text-[var(--color-fg3)]">{looseTiles.length}</span>
-              </span>
-            </div>
-            {looseTiles.map((t) => renderTile(t, 1, LOOSE_BUCKET))}
+          <div
+            className="mt-1.5 rounded-lg"
+            style={drag?.type === "tile" && drag.bucket !== LOOSE_BUCKET && onReparentTile && dropTarget === `bucket:${LOOSE_BUCKET}`
+              ? { boxShadow: "inset 0 2px 0 0 var(--color-brand)" } : undefined}
+            onDragOver={(e) => {
+              if (drag?.type !== "tile" || drag.bucket === LOOSE_BUCKET || !onReparentTile) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (dropTarget !== `bucket:${LOOSE_BUCKET}`) setDropTarget(`bucket:${LOOSE_BUCKET}`);
+            }}
+            onDrop={(e) => {
+              if (drag?.type !== "tile" || drag.bucket === LOOSE_BUCKET || !onReparentTile) return;
+              e.preventDefault();
+              e.stopPropagation();
+              dropTileIntoBucket(LOOSE_BUCKET);
+            }}
+          >
+            {looseTiles.map((t) => renderTile(t, 0, LOOSE_BUCKET))}
           </div>
         )}
       </div>

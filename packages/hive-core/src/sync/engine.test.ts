@@ -114,6 +114,12 @@ function makeFakeProvider() {
         labels: remote.labels,
       };
     },
+    isTerminalRemoteState(_config, remoteState: string) {
+      const name = remoteState.trim().toLowerCase();
+      if (name === "removed") return "cancelled";
+      if (name === "done" || name === "closed" || name === "resolved" || name === "completed") return "done";
+      return null;
+    },
     async listComments(_config, _secret, externalId: string) {
       return (comments.get(externalId) ?? []).map((c) => ({ id: c.id, text: c.text, author: c.author }));
     },
@@ -258,6 +264,95 @@ describe("runSync", () => {
     // Title pushed, but the remote state stayed "Doing" (local state not pushed).
     expect(db.get("11")?.title).toBe("Local edit");
     expect(db.get("11")?.state).toBe("Doing");
+  });
+
+  test("a TERMINAL remote state pulls the local column to done (overrides decoupling)", async () => {
+    const root = await mkRoot();
+    const { provider, db } = makeFakeProvider();
+    db.set("40", { rev: 1, title: "T", description: "", state: "Doing", labels: [] });
+    await runSync(root, provider, {}, "secret");
+    const [issue] = await listIssues(root);
+    const id = issue!.id;
+    // Locally the column is wherever the pull left it (backlog default); move it
+    // to in_progress to prove the terminal pull overrides a non-terminal local.
+    await updateIssue(root, id, { state: "in_progress" });
+
+    // Azure closes the item.
+    db.set("40", { rev: 2, title: "T", description: "", state: "Done", labels: [] });
+    const report = await runSync(root, provider, {}, "secret");
+
+    expect(report.pulled).toBe(1);
+    expect((await readIssue(root, id)).state).toBe("done");
+  });
+
+  test("a remote item that is ALREADY terminal is created locally in done", async () => {
+    const root = await mkRoot();
+    const { provider, db } = makeFakeProvider();
+    // "Closed" isn't in the state map (reverse → backlog fallback) but IS terminal.
+    db.set("41", { rev: 1, title: "Closed upstream", description: "", state: "Closed", labels: [] });
+
+    const report = await runSync(root, provider, {}, "secret");
+    expect(report.created).toBe(1);
+    const [issue] = await listIssues(root);
+    expect((await readIssue(root, issue!.id)).state).toBe("done");
+  });
+
+  test("a link that is ALREADY terminal syncs to done even with no rev change", async () => {
+    const root = await mkRoot();
+    const { provider, db } = makeFakeProvider();
+    // First sync creates the local issue in done (Done is in the state map).
+    db.set("42", { rev: 1, title: "Done upstream", description: "", state: "Done", labels: [] });
+    await runSync(root, provider, {}, "secret");
+    const [issue] = await listIssues(root);
+    const id = issue!.id;
+    // A human moves it OFF done locally; the remote is unchanged (same rev).
+    await updateIssue(root, id, { state: "todo" });
+
+    // No rev/field change → short-circuit branch. Terminal must still pull it back.
+    const report = await runSync(root, provider, {}, "secret");
+    expect(report.pulled).toBe(1);
+    expect((await readIssue(root, id)).state).toBe("done");
+  });
+
+  test("Removed upstream maps to cancelled locally", async () => {
+    const root = await mkRoot();
+    const { provider, db } = makeFakeProvider();
+    db.set("43", { rev: 1, title: "Removed upstream", description: "", state: "Removed", labels: [] });
+    const report = await runSync(root, provider, {}, "secret");
+    expect(report.created).toBe(1);
+    const [issue] = await listIssues(root);
+    expect((await readIssue(root, issue!.id)).state).toBe("cancelled");
+  });
+
+  test("an OFFLINE issue is never pushed, even with a pending sync link intent", async () => {
+    const root = await mkRoot();
+    const { provider, db } = makeFakeProvider();
+    // Offline + a sync hint: createIssue must suppress the pending link, and the
+    // engine must skip it regardless.
+    await createIssue(root, { title: "Local secret", offline: true, sync: { provider: "fake" } });
+
+    const report = await runSync(root, provider, {}, "secret");
+    expect(report.skippedLocalOnly).toBe(1);
+    expect(report.pushed).toBe(0);
+    expect(db.size).toBe(0);
+  });
+
+  test("a linked issue turned OFFLINE stops syncing (no pull of remote changes)", async () => {
+    const root = await mkRoot();
+    const { provider, db } = makeFakeProvider();
+    db.set("50", { rev: 1, title: "Was linked", description: "", state: "New", labels: [] });
+    await runSync(root, provider, {}, "secret");
+    const [issue] = await listIssues(root);
+    const id = issue!.id;
+
+    // Mark offline, then change the remote — the offline issue must be skipped.
+    await updateIssue(root, id, { offline: true });
+    db.set("50", { rev: 2, title: "Changed on Azure", description: "", state: "Doing", labels: [] });
+
+    const report = await runSync(root, provider, {}, "secret");
+    expect(report.pulled).toBe(0);
+    expect(report.skippedLocalOnly).toBe(1);
+    expect((await readIssue(root, id)).title).toBe("Was linked"); // unchanged
   });
 });
 

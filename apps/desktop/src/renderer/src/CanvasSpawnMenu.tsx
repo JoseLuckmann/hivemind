@@ -11,7 +11,7 @@
  */
 import { createPortal } from "react-dom";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { FilePlus2 } from "lucide-react";
+import { FilePlus2, FileText } from "lucide-react";
 import { OPEN_KINDS } from "./spawn-icons";
 import { AGENTS, AgentIcon } from "./agents";
 
@@ -34,6 +34,8 @@ interface Props {
   onSpawnKind: (kind: string, frameId: string | null) => void;
   /** Open the single-file picker (spawns a file tile on pick). */
   onSpawnFile: (frameId: string | null) => void;
+  /** Spawn a blank scratch note tile (jot something on the canvas). */
+  onNewFile: (frameId: string | null) => void;
 }
 
 function Section({ label }: { label: string }) {
@@ -56,7 +58,7 @@ function Item({ icon, label, onClick }: { icon: ReactNode; label: string; onClic
   );
 }
 
-export function CanvasSpawnMenu({ menu, onClose, onSpawnAgent, onSpawnKind, onSpawnFile }: Props) {
+export function CanvasSpawnMenu({ menu, onClose, onSpawnAgent, onSpawnKind, onSpawnFile, onNewFile }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ x: menu.x, y: menu.y });
 
@@ -123,9 +125,16 @@ export function CanvasSpawnMenu({ menu, onClose, onSpawnAgent, onSpawnKind, onSp
             />
           );
         })}
+
+        <Section label="File" />
         <Item
           icon={<FilePlus2 size={14} />}
-          label="File…"
+          label="New file (scratch)"
+          onClick={pick(() => onNewFile(fid))}
+        />
+        <Item
+          icon={<FileText size={14} />}
+          label="Open file…"
           onClick={pick(() => onSpawnFile(fid))}
         />
       </div>

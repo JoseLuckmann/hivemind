@@ -84,6 +84,12 @@ interface Session {
   /** Bytes written to the term since last snapshot — drives the debounced disk
    *  write (skipped while inactive to avoid wasting fs writes on idle sessions). */
   dirty: boolean;
+  /** A snapshot write that is mid-flight (its xterm write-drain callback hasn't
+   *  fired yet). `flushAll` awaits this so a debounced snapshot that started just
+   *  before a flush isn't missed — the callback delivers to `onSnapshot`
+   *  asynchronously, so clearing `dirty` alone doesn't mean the snapshot has
+   *  actually been emitted yet. Resolves when the emit completes. */
+  inflightSnapshot?: Promise<void>;
   /** Reboot-restore mode: this session was loaded from disk and the PTY behind
    *  it is FRESH. The headless term already contains the pre-reboot screen so
    *  attach replays correctly; the live shell takes over from here. */
@@ -508,7 +514,15 @@ export class SessionManager {
    *  debounce window's worth of state is silently lost on every graceful stop. */
   flushAll(): Promise<void> {
     const all: Promise<void>[] = [];
-    for (const s of this.sessions.values()) all.push(this.flushSnapshot(s));
+    for (const s of this.sessions.values()) {
+      // A snapshot may already be MID-FLIGHT (a debounced write whose xterm
+      // drain callback hasn't delivered to onSnapshot yet). Clearing `dirty`
+      // when that write started means flushSnapshot below would no-op and miss
+      // it, so await the in-flight promise too — the graceful-stop path (and
+      // tests) must observe every snapshot that was in progress.
+      if (s.inflightSnapshot) all.push(s.inflightSnapshot);
+      all.push(this.flushSnapshot(s));
+    }
     return Promise.all(all).then(() => undefined);
   }
 
@@ -532,10 +546,10 @@ export class SessionManager {
   }
   private flushSnapshot(s: Session): Promise<void> {
     if (!this.onSnapshot) return Promise.resolve();
-    if (!s.dirty) return Promise.resolve();
+    if (!s.dirty) return s.inflightSnapshot ?? Promise.resolve();
     this.cancelSnapshotTimer(s.id);
     s.dirty = false;
-    return new Promise<void>((resolve) => {
+    const p = new Promise<void>((resolve) => {
       // Drain the xterm write queue before serializing — without this, the
       // snapshot misses output emitted in the same tick as the flush trigger.
       s.term.write("", () => {
@@ -551,9 +565,15 @@ export class SessionManager {
           // Disk write failed — re-dirty so a later attempt retries.
           s.dirty = true;
         }
+        // This write is no longer in flight (only clear if it's still ours — a
+        // newer flush may have replaced it).
+        if (s.inflightSnapshot === p) s.inflightSnapshot = undefined;
         resolve();
       });
     });
+    // Track it so a concurrent flushAll awaits THIS emit, not a resolved no-op.
+    s.inflightSnapshot = p;
+    return p;
   }
   private cancelSnapshotTimer(id: string): void {
     const t = this.snapshotTimers.get(id);

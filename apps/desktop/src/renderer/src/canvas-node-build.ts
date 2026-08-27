@@ -54,6 +54,9 @@ export interface NodeBuildCtx {
   closeTile: (id: string) => void;
   /** explorer only — repoint a File Explorer tile at a different folder. */
   onSetFolder: (id: string, folder: string) => void;
+  /** file (scratch) only — persist an in-memory note: prompt for a path, write
+   *  the buffer, and convert the scratch tile into a bound file tile. */
+  saveScratch: (tileId: string, text: string) => void;
   onNodeResizeCommit: (id: string, w: number, h: number, x?: number, y?: number) => void;
   renameTile: (id: string, name: string) => void;
   setAgentTitle: (id: string, title: string) => void;
@@ -70,7 +73,7 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
     tileNames, agentTitles, frameTiles, framesChipNames,
     updateFrameTitle, updateFrameColor, deleteFrame, arrangeFrame, bringFrameToFront,
     onAttachWorktree, onCreateWorktree, unbindBranch, bindWorkspace, unbindWorkspace,
-    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, onNodeResizeCommit, renameTile, setAgentTitle,
+    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, saveScratch, onNodeResizeCommit, renameTile, setAgentTitle,
     onTogglePin, onPinChange,
   } = ctx;
 
@@ -250,7 +253,10 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
   };
   for (const t of tiles) {
     const effRepo = tileRepo(t.id);
-    if ((t.kind === "editor" || t.kind === "diff" || t.kind === "file") && !effRepo) continue;
+    // A `file` tile with a BOUND path needs a repo to resolve it; a SCRATCH file
+    // tile (no `t.file`) is a self-contained in-memory note and renders anywhere.
+    if ((t.kind === "editor" || t.kind === "diff") && !effRepo) continue;
+    if (t.kind === "file" && t.file && !effRepo) continue;
     let node: Omit<Node, "position">;
     const { width: w, height: h } = defaultSizeForKind(t.kind);
     if (t.kind === "editor") {
@@ -276,7 +282,9 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
         style: sized(t.id, w, h),
         data: {
           repoPath: effRepo,
-          file: t.file ?? "",
+          // undefined (not "") → FileTile renders its SCRATCH note shape.
+          file: t.file || undefined,
+          onSaveScratch: (text: string) => saveScratch(t.id, text),
           onOpenInBrowser: (url: string) => openUrlInBrowser(t.id, url),
           onClose: () => closeTile(t.id),
           onResize: onNodeResizeCommit,

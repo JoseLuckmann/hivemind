@@ -558,4 +558,41 @@ describe("createIssue / updateIssue (CLI + UI write path)", () => {
     expect(updated.github).toBe(null);
     expect(updated.sections.activity.map((a) => a.message)).toContain("github: 7 → —");
   });
+
+  test("archive / unarchive round-trips and drops the key when false", async () => {
+    const root = await mkRoot();
+    const created = await createIssue(root, { title: "t" });
+    expect(created.archived).toBeUndefined();
+
+    const archived = await updateIssue(root, created.id, { archived: true }, "ui");
+    expect(archived.archived).toBe(true);
+    expect((await readIssue(root, created.id)).archived).toBe(true);
+    expect(archived.sections.activity.map((a) => a.message)).toContain("archived");
+
+    const unarchived = await updateIssue(root, created.id, { archived: false }, "ui");
+    expect(unarchived.archived).toBeUndefined(); // falsey → no key on disk
+    expect((await readIssue(root, created.id)).archived).toBeUndefined();
+    expect(unarchived.sections.activity.map((a) => a.message)).toContain("unarchived");
+  });
+
+  test("createIssue with offline persists the flag and skips the pending sync link", async () => {
+    const root = await mkRoot();
+    const created = await createIssue(root, {
+      title: "local only",
+      offline: true,
+      sync: { provider: "fake" },
+    });
+    expect(created.offline).toBe(true);
+    // Offline suppresses the pending sync link entirely.
+    expect(created.sync).toBeUndefined();
+    expect((await readIssue(root, created.id)).offline).toBe(true);
+  });
+
+  test("updateIssue can toggle offline back off (key dropped)", async () => {
+    const root = await mkRoot();
+    const created = await createIssue(root, { title: "t", offline: true });
+    const online = await updateIssue(root, created.id, { offline: false }, "ui");
+    expect(online.offline).toBeUndefined();
+    expect((await readIssue(root, created.id)).offline).toBeUndefined();
+  });
 });

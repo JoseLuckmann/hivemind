@@ -159,6 +159,18 @@ export const IssueFrontmatterZ = z.object({
   preferredFrame: z.string().optional(),
   preferredAgent: z.string().optional(),
   github: z.number().int().positive().nullable().default(null),
+  // Archived flag — an issue "put away" without deleting it. Preserves its
+  // state (done/cancelled/…) but hides it from the board by default (toggle to
+  // reveal, mirroring "show cancelled"). Optional-not-defaulted so existing
+  // files without the field stay valid and don't churn; read as
+  // `issue.archived ?? false`.
+  archived: z.boolean().optional(),
+  // OFFLINE flag — this issue is deliberately kept OUT of external-tracker sync.
+  // The sync engine skips it entirely: never pushes it upstream, never pulls
+  // remote state onto it, even if the board is synced. Set at creation ("create
+  // OFFLINE") for local-only planning items. Same optional-not-defaulted
+  // convention; read as `issue.offline ?? false`.
+  offline: z.boolean().optional(),
   // Cross-repo / soft links. Optional (not `.default([])`) so existing issue
   // literals and on-disk files without the field stay valid without churn;
   // read it as `issue.links ?? []`.
@@ -221,6 +233,8 @@ export interface IssueSummary
     | "preferredAgent"
     | "github"
     | "sync"
+    | "archived"
+    | "offline"
     | "created"
     | "updated"
   > {
@@ -241,6 +255,8 @@ export type IssuePatch = Partial<{
   preferredFrame: string | null;
   preferredAgent: string | null;
   github: number | null;
+  archived: boolean;
+  offline: boolean;
   description: string;
   acceptanceCriteria: Issue["sections"]["acceptanceCriteria"];
   extra: string;

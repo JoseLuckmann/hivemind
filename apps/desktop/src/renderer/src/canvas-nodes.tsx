@@ -643,7 +643,8 @@ export function TileBody({
         <TileErrorBoundary label="File" onClose={data.onClose as (() => void) | undefined}>
           <FileTile
             repoPath={data.repoPath as string}
-            file={data.file as string}
+            file={data.file as string | undefined}
+            onSaveScratch={data.onSaveScratch as ((p: string) => void) | undefined}
             onClose={data.onClose as () => void}
             onOpenInBrowser={data.onOpenInBrowser as ((u: string) => void) | undefined}
             pinned={data.pinned as boolean | undefined}

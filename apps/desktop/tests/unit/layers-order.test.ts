@@ -15,7 +15,7 @@ const store = new Map<string, string>();
 };
 
 const {
-  loadLayersOrder, saveLayersOrder, applyOrder, reorder, LAYERS_ORDER_KEY, LOOSE_BUCKET,
+  loadLayersOrder, saveLayersOrder, applyOrder, reorder, placeInto, LAYERS_ORDER_KEY, LOOSE_BUCKET,
 } = await import("../../src/renderer/src/layers-order.ts");
 
 beforeEach(() => store.clear());
@@ -72,6 +72,36 @@ test("reorder returns a NEW array (does not mutate input)", () => {
   const input = ["a", "b", "c"];
   const out = reorder(input, "c", "a");
   assert.deepEqual(input, ["a", "b", "c"]);
+  assert.notEqual(out, input);
+});
+
+// ── placeInto (reparent) ─────────────────────────────────────────────────────
+
+test("placeInto inserts the moved id before the target", () => {
+  assert.deepEqual(placeInto(["a", "b"], "x", "b"), ["a", "x", "b"]);
+});
+
+test("placeInto appends when beforeId is null", () => {
+  assert.deepEqual(placeInto(["a", "b"], "x", null), ["a", "b", "x"]);
+});
+
+test("placeInto appends when beforeId is not present in the destination", () => {
+  assert.deepEqual(placeInto(["a", "b"], "x", "zzz"), ["a", "b", "x"]);
+});
+
+test("placeInto de-dupes a moved id that already sits in the destination", () => {
+  assert.deepEqual(placeInto(["a", "x", "b"], "x", "b"), ["a", "x", "b"]);
+  assert.deepEqual(placeInto(["a", "x", "b"], "x", null), ["a", "b", "x"]);
+});
+
+test("placeInto into an empty destination yields just the moved id", () => {
+  assert.deepEqual(placeInto<string>([], "x", null), ["x"]);
+});
+
+test("placeInto returns a NEW array (does not mutate input)", () => {
+  const input = ["a", "b"];
+  const out = placeInto(input, "x", "a");
+  assert.deepEqual(input, ["a", "b"]);
   assert.notEqual(out, input);
 });
 

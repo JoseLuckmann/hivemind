@@ -21,7 +21,7 @@ import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   GitBranch, FolderGit2, Server, LayoutGrid, Plus, Pencil, Trash2, Palette,
-  Bot, GitCommitHorizontal, ChevronRight, ArrowUp, ArrowDown, FileText,
+  Bot, GitCommitHorizontal, ChevronRight, ArrowUp, ArrowDown, FileText, FilePlus2,
 } from "lucide-react";
 import { AGENTS } from "./agents";
 import { WorktreePicker } from "./WorktreePicker";
@@ -35,6 +35,8 @@ export interface FrameActions {
   onOpenInFrame: (frameId: string, kind: string) => void;
   /** Open the workspace file picker → spawn a single-file tile into the frame. */
   onOpenFilePicker: (frameId: string) => void;
+  /** Spawn a blank scratch note tile into the frame. */
+  onNewFile: (frameId: string) => void;
   onCreateWorktree: (frameId: string, branch: string) => void;
   onAttachWorktree: (frameId: string, entry: import("../../shared/ipc").WorktreeEntry) => void;
   onBindWorkspace: (frameId: string) => void;
@@ -173,7 +175,8 @@ export function FrameRailMenu({
           {OPEN_KINDS.map(({ kind, label, icon: Icon }) => (
             <Item key={kind} icon={<Icon size={13} />} label={label} onClick={() => { actions.onOpenInFrame(fid, kind); close(); }} />
           ))}
-          <Item icon={<FileText size={13} />} label="File…" onClick={() => { actions.onOpenFilePicker(fid); close(); }} />
+          <Item icon={<FilePlus2 size={13} />} label="New file (scratch)" onClick={() => { actions.onNewFile(fid); close(); }} />
+          <Item icon={<FileText size={13} />} label="Open file…" onClick={() => { actions.onOpenFilePicker(fid); close(); }} />
         </SubmenuRow>
 
         <SubmenuRow icon={<GitCommitHorizontal size={13} />} label="Git" open={sub === "git"} onOpen={() => setSub("git")}>

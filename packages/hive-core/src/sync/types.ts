@@ -108,6 +108,14 @@ export interface SyncProvider<TConfig = unknown> {
    *  type (fallback to a generic list) — powers the "move on the remote board"
    *  picker. Best-effort: may return the configured state map's values. */
   remoteStates?(config: TConfig, workItemType?: string): string[];
+  /** Whether a raw remote state name is TERMINAL (the item is closed/finished:
+   *  Done / Closed / Resolved / Completed / Removed / …). Terminal remote states
+   *  are the ONE case where the engine syncs remote → local state (a finished
+   *  upstream item lands in the local Done/Cancelled column), overriding the
+   *  usual decoupling. Non-terminal states stay decoupled (the local Kanban
+   *  column is the user's to move). Optional: absent ⇒ the engine never forces a
+   *  local state from the remote. */
+  isTerminalRemoteState?(config: TConfig, remoteState: string): "done" | "cancelled" | null;
   /** Maps a remote item back onto the canonical fields hivemind owns. `assignee`
    *  is the remote assignee's stable id (email/UPN) or null when unassigned —
    *  the engine turns it into a `member` assignee so the board can default to

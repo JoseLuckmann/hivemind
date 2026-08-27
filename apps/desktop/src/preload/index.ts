@@ -96,6 +96,7 @@ const api: HiveIpc & {
   fileRead: (repoPath, relPath) => ipcRenderer.invoke("fileRead", repoPath, relPath),
   fileWrite: (repoPath, relPath, contents) =>
     ipcRenderer.invoke("fileWrite", repoPath, relPath, contents),
+  fileReadBase64: (repoPath, relPath) => ipcRenderer.invoke("fileReadBase64", repoPath, relPath),
   openPathInApp: (cwd, target) => ipcRenderer.invoke("openPathInApp", cwd, target),
 
   diagLog: (line) => ipcRenderer.invoke("diagLog", line),

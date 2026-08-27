@@ -306,7 +306,8 @@ export function useSpawn(ctx: SpawnCtx) {
     [spawnInto],
   );
   const spawnVis = useCallback(
-    (which: "tree" | "shell" | "diff" | "issues") => spawnInto(which === "tree" ? "editor" : which),
+    (which: "tree" | "editor" | "explorer" | "shell" | "diff" | "issues") =>
+      spawnInto(which === "tree" || which === "editor" ? "editor" : which === "explorer" ? "explorer" : which),
     [spawnInto],
   );
 

@@ -16,7 +16,7 @@ export interface CanvasShortcutsCtx {
   spawnClaude: (mode?: string, work?: string) => void;
   /** Spawn the tool island's currently-selected agent (claude/codex/opencode). */
   spawnSelectedAgent: () => void;
-  spawnVis: (which: "tree" | "shell" | "diff" | "issues") => void;
+  spawnVis: (which: "tree" | "editor" | "explorer" | "shell" | "diff" | "issues") => void;
   /** Spawn a Browser tile into the active/resolved frame. */
   spawnBrowser: () => void;
   addFrame: () => void;
@@ -43,8 +43,8 @@ export function useCanvasShortcuts(ctx: CanvasShortcutsCtx) {
       spawnClaude(obj?.mode, obj?.work);
     };
     const onToggle = (e: Event) => {
-      const which = (e as CustomEvent<"tree" | "shell" | "diff" | "issues">).detail;
-      if (which === "tree" || which === "shell" || which === "diff" || which === "issues") {
+      const which = (e as CustomEvent<"tree" | "editor" | "explorer" | "shell" | "diff" | "issues">).detail;
+      if (which === "tree" || which === "editor" || which === "explorer" || which === "shell" || which === "diff" || which === "issues") {
         spawnVis(which);
       }
     };
@@ -84,7 +84,7 @@ export function useCanvasShortcuts(ctx: CanvasShortcutsCtx) {
       switch (e.key) {
         case "1": e.preventDefault(); spawnVis("shell"); break;
         case "2": e.preventDefault(); spawnSelectedAgent(); break;
-        case "3": if (repoPath) { e.preventDefault(); spawnVis("tree"); } break;
+        case "3": if (repoPath) { e.preventDefault(); spawnVis("explorer"); } break;
         case "4": if (repoPath) { e.preventDefault(); spawnVis("diff"); } break;
         case "5": if (repoPath) { e.preventDefault(); spawnVis("issues"); } break;
         case "6": e.preventDefault(); addFrame(); break;

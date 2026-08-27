@@ -1147,6 +1147,17 @@ ipcMain.handle("fileWrite", wrap((_e, repoPath: string, relPath: string, content
     ? writeRemoteFile(repoPath, assertRemoteRel(relPath), contents)
     : fsp.writeFile(resolveInRepo(repoPath, relPath), contents, "utf8")
 ));
+// Binary read → base64, for the image reference tile. Remote (SFTP) reads come
+// back as a UTF-8 string; base64-encoding that would corrupt real binary bytes,
+// so remote is limited to text-ish images (svg). Local reads the raw Buffer.
+ipcMain.handle("fileReadBase64", wrap(async (_e, repoPath: string, relPath: string) => {
+  if (isRemote(repoPath)) {
+    const s = await readRemoteFile(repoPath, assertRemoteRel(relPath));
+    return Buffer.from(s, "utf8").toString("base64");
+  }
+  const buf = await fsp.readFile(resolveInRepo(repoPath, relPath));
+  return buf.toString("base64");
+}));
 
 // Files the terminal will hand to the OS opener — a VIEWABLE allowlist, not a
 // denylist, so executables / installers / shortcuts (.exe .desktop .lnk .msi

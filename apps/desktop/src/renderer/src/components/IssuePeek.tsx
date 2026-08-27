@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Play, FileQuestion, X } from "lucide-react";
+import { Play, FileQuestion, X, Archive, ArchiveRestore, WifiOff, Wifi } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AcceptanceItem, Issue, IssueState, IssueType, LinkType } from "@hivemind/core/types";
 import {
@@ -26,6 +26,7 @@ import { STATE_COLOR, STATE_LABEL, STATE_ORDER, StateIcon } from "./StateMeta";
 import { AssigneePicker, LabelPicker, ParentPicker } from "../issues/pickers";
 import { SubIssueTree } from "../issues/SubIssueTree";
 import { IssueAgents } from "./IssueAgents";
+import { markIssueSeen } from "../issues/useIssueAgentSignal";
 import { AGENTS } from "../agents";
 
 /** Enabled agents offered in the "Preferred agent" picker. */
@@ -75,6 +76,10 @@ export function IssuePeek({ root, id, onClose }: Props) {
   const subIssues = useMemo(() => (id ? allIssues.filter((i) => i.parent === id) : []), [allIssues, id]);
   const parentCandidates = useMemo(() => allIssues.filter((i) => i.id !== id), [allIssues, id]);
 
+  // Opening an issue's detail counts as SEEING any finished-but-unseen agent
+  // result on it — clears the board card's done-unseen (lavender) signal.
+  useEffect(() => { if (id) markIssueSeen(id); }, [id]);
+
   if (!id) return null;
 
   return (
@@ -119,6 +124,16 @@ export function IssuePeek({ root, id, onClose }: Props) {
               {issue.type && (
                 <span className="text-[10px] uppercase tracking-wide px-1.5 h-4 inline-flex items-center rounded bg-[var(--color-bg3)] text-[var(--color-fg2)] font-medium" title="Issue type">
                   {issue.type}
+                </span>
+              )}
+              {issue.archived && (
+                <span className="text-[10px] uppercase tracking-wide px-1.5 h-4 inline-flex items-center gap-1 rounded bg-[var(--color-bg3)] text-[var(--color-fg3)] font-medium" title="Archived">
+                  <Archive size={9} aria-hidden /> archived
+                </span>
+              )}
+              {issue.offline && (
+                <span className="text-[10px] uppercase tracking-wide px-1.5 h-4 inline-flex items-center gap-1 rounded bg-[var(--color-bg3)] text-[var(--color-fg3)] font-medium" title="Offline — not synced with the tracker">
+                  <WifiOff size={9} aria-hidden /> offline
                 </span>
               )}
               {(() => {
@@ -178,6 +193,21 @@ export function IssuePeek({ root, id, onClose }: Props) {
                   Work on this
                 </button>
                 <span aria-hidden className="mx-0.5 h-5 w-px bg-[var(--color-line2)]" />
+                {/* Archive / Unarchive — "put away" without deleting. Preserves
+                    state; hides from the board by default (toggle "Show archived"
+                    to reveal). */}
+                <button
+                  onClick={() => {
+                    if (!root) return;
+                    patch.mutate({ root, id: issue.id, patch: { archived: !issue.archived } });
+                  }}
+                  className="size-7 grid place-items-center rounded-md text-[var(--color-fg3)] hover:bg-[var(--color-bg3)] hover:text-[var(--color-fg)] cursor-pointer hm-soft"
+                  title={issue.archived ? "Unarchive issue" : "Archive issue"}
+                  aria-label={issue.archived ? "Unarchive issue" : "Archive issue"}
+                  disabled={patch.isPending}
+                >
+                  {issue.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+                </button>
                 <button
                   onClick={() => {
                     if (!root) return;
@@ -332,6 +362,16 @@ export function IssuePeek({ root, id, onClose }: Props) {
                           title="Pull latest from the tracker, then push my local edits and comments"
                         >
                           {runSync.isPending ? "Syncing…" : "↻ Sync to Azure"}
+                        </button>
+                        {/* Per-issue OFFLINE toggle: keep this issue OUT of sync.
+                            When offline the engine never pushes/pulls it. */}
+                        <button
+                          onClick={() => patch.mutate({ root, id: issue.id, patch: { offline: !issue.offline } })}
+                          disabled={patch.isPending}
+                          className="w-full inline-flex items-center justify-center gap-1.5 h-7 px-2 rounded-md border border-[var(--color-line2)] text-[11.5px] font-medium text-[var(--color-fg2)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                          title={issue.offline ? "Re-enable sync for this issue" : "Stop syncing this issue with the tracker"}
+                        >
+                          {issue.offline ? <><Wifi size={12} aria-hidden /> Enable sync</> : <><WifiOff size={12} aria-hidden /> Go offline</>}
                         </button>
                       </div>
                     </PropRow>

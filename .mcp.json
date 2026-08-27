@@ -1,8 +1,14 @@
 {
   "mcpServers": {
     "hive": {
-      "command": "hive",
-      "args": ["mcp-stdio"]
+      "command": "/home/Jose.Luckmann/.local/bin/hive",
+      "args": [
+        "mcp-stdio"
+      ],
+      "env": {
+        "HIVE_ROOT": "/home/Jose.Luckmann/Workspace/.hivemind",
+        "HIVE_AGENT_ID": "claude"
+      }
     }
   }
 }

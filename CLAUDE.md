@@ -166,3 +166,94 @@ If the release workflow fails but the tag is pushed: delete the tag (`git tag -d
 
 If you (Claude) made any change that ships to users — code, dependency, install behavior, MCP tool surface — append a one-line entry to `CHANGELOG.md` under `## [Unreleased]` BEFORE handing the session back. The maintainer can then cut a release with `./scripts/release.sh <bump>` and the changelog is ready.
 <!-- release:end -->
+
+
+<!-- hivemind:agentic:start -->
+## Agentic mode — MCP tools for claude
+
+This workspace has the **`hive` MCP server** auto-loaded via `.mcp.json`.
+When you (claude) act on an issue, use `mcp__hive__*` tools — NOT the
+`hive` CLI via Bash. Reserve the CLI for human use.
+
+### Tools available
+
+- `mcp__hive__get_issue({ id })` — load full context (title, description,
+  acceptance criteria, recent activity).
+- `mcp__hive__list_issues({ state?, label?, assignee? })`
+- `mcp__hive__set_state({ id, state, note? })` — backlog | todo |
+  in_progress | in_review | done | cancelled
+- `mcp__hive__add_comment({ id, message })`
+- `mcp__hive__mark_acceptance({ id, index, done })` — 0-based
+- `mcp__hive__update_issue({ id, title?, description?, labels?, ... })`
+- `mcp__hive__create_issue({ title, parent?, labels?, state? })`
+- `mcp__hive__delete_issue({ id })` — destructive; only on explicit ask
+
+### Execution contract (REQUIRED)
+
+When the user asks you to work on an issue (e.g. `PAY-42`):
+
+1. `hive_get_issue` → load context.
+2. Plan briefly (one comment via `hive_add_comment`).
+3. Execute. Mark each criterion done as you go (`hive_mark_acceptance`).
+4. Comment progress at meaningful checkpoints (file:line refs).
+5. **Every session MUST end with `hive_set_state`** with one of:
+   - `in_review` — work complete, awaiting human review
+   - `done` — only with explicit user authority
+   - `blocked` — cannot proceed; include `note` explaining what's blocked
+   - `in_progress` — still going, will resume
+
+Do not exit a session silently.
+
+### Sub-tasks
+
+If an issue is too big, break it down via
+`mcp__hive__create_issue({ title, parent: $KEY })`. Children inherit the
+parent's id (e.g. `PAY-42.1`).
+
+### Multi-agent control plane (when running inside hivemind)
+
+If you are an agent in a hivemind tile, you can also DRIVE THE CANVAS — spawn and
+coordinate other agents. (These no-op with "app not running" if hivemind isn't
+up, so they're safe to try.)
+
+- `mcp__hive__hive_spawn_agent({ prompt, agent?, frame?, supervise? })` —
+  delegate a subtask to a sibling agent. It AUTO-REPORTS its result back into your
+  session when done (no polling). `frame` picks the workspace (id / repo name /
+  title — discover via `hive_list_frames`); `supervise` routes the worker's
+  tool-permission prompts to YOU (answer with `hive_approve`).
+- `mcp__hive__hive_send({ tileId, text })` / `hive_send_keys({ tileId, keys })`
+  — send a follow-up, or key tokens (e.g. `["Down","Enter"]`) to drive a
+  worker's interactive picker (e.g. its AskUserQuestion).
+- `mcp__hive__hive_read({ tileId })` — optionally block for a worker's reply.
+- `mcp__hive__hive_approve({ reqId, decision })` — answer a supervised worker:
+  `allow` | `deny` | `always` | `never`.
+- `mcp__hive__hive_list_frames()` / `hive_list_tiles({ frame? })` — discover
+  frames and the agents in them (grouped, with live status).
+- `mcp__hive__hive_focus` / `hive_close_tile` / `hive_connect` /
+  `hive_report` — focus a tile, close a worker, pipe one agent into another, or
+  report a result up to your parent.
+
+Delegate generously: fire a worker and keep working — its reply lands in your
+inbox when it's done.
+
+### Multi-agent workflows (fan-out / pipeline / map-reduce)
+
+To orchestrate a FLEET of workers in one call, use
+`mcp__hive__hive_workflow({ shape, … })` — it spawns the workers as visible
+tiles, drives them, and BLOCKS until they're done, returning their replies
+aggregated. Pick a `shape`:
+
+- `fanout` — one worker per `items[i]`, run in parallel; `prompt` is a
+  template with a `{item}` placeholder. (e.g. review N files at once.)
+- `mapreduce` — a fanout, then ONE reducer agent fed all outputs via
+  `reduce_prompt` (`{results}` = joined outputs).
+- `pipeline` — a sequential chain; `stages` is an array of prompts, each may
+  use `{input}` to reference the prior stage's reply.
+
+Add `supervise` to broker the workers' tool prompts to you, `frame` to target a
+workspace, `max_concurrent` (default 6) to bound parallelism. For dynamic control
+flow a fixed shape can't express (loop-until-done, judge panels), drive
+`hive_spawn_agent`/`hive_read`/`hive_connect` yourself — the `hive-workflow`
+skill has the patterns.
+
+<!-- hivemind:agentic:end -->

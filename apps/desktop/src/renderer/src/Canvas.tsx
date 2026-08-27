@@ -957,13 +957,42 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
   // grown frame never overlaps a neighbour. We only pick the new tile's slot.
   // Tile spawning + in-frame placement (placeInFrame / ensureFrame / spawnTile
   // + spawnInto/spawnClaude/spawnVis/frameOpen). See useSpawn.
-  const { spawnTile, spawnClaude, spawnAgent, spawnVis, spawnInto, frameOpen, openPlanReview, hcpSpawnAgent, ensureFrame } = useSpawn({
+  const { spawnTile, spawnClaude, spawnAgent, spawnVis, spawnInto, frameOpen, openPlanReview, hcpSpawnAgent, ensureFrame, placeInFrame } = useSpawn({
     repoPath, claudeMode, claudeModel,
     positionsRef, sizesRef, tilesRef, frameOfRef, framesRef, selectedFrameIdRef,
     selectedTileIdRef, repoPathRef, rootRef, lastActiveFrameRef, claudeSeqRef,
     setFrameOf, setPositions, setSelectedTileId, setFocusReq, setFrames,
     setSelectedFrameId, setTiles, setSpawnPick, focusTile,
   });
+
+  // Reparent a tile from the Layers panel — move it into another frame (or the
+  // loose "Canvas" bucket) WITHOUT a canvas drag. Changing frameOf is enough for
+  // the auto-fit effect to reflow both frames' geometry; placeInFrame packs the
+  // tile into a free slot of the destination so it lands cleanly (and the source
+  // frame shrinks around what's left). Moving to LOOSE_BUCKET drops the frameOf
+  // entry — the tile becomes a loose canvas member. The panel already computed
+  // the destination bucket's new order (movedId in place), so persist that too.
+  const onReparentTileFromPanel = useCallback((tileId: string, toBucket: string, orderedIds: string[]) => {
+    if (toBucket === LOOSE_BUCKET) {
+      setFrameOf((m) => {
+        if (!(tileId in m)) return m;
+        const next = { ...m };
+        delete next[tileId];
+        return next;
+      });
+    } else {
+      const frame = framesRef.current.find((f) => f.id === toBucket);
+      if (!frame) return;
+      // placeInFrame sets frameOf + a packed position AND focuses the tile — the
+      // user asked for this move, so centering on where it landed is right.
+      placeInFrame(tileId, frame);
+    }
+    setLayersOrder((prev) => {
+      const next = { ...prev, tiles: { ...prev.tiles, [toBucket]: orderedIds } };
+      saveLayersOrder(persistKey, next);
+      return next;
+    });
+  }, [placeInFrame, persistKey, setFrameOf]);
 
   // Right-click on empty canvas space → open the spawn menu. We hit-test the
   // click against the frames (innermost wins) so a component spawned from inside
@@ -1019,6 +1048,59 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     const repo = targetFrame.worktreePath ?? targetFrame.workspacePath ?? repoPathRef.current ?? null;
     setFilePick({ frameId: targetFrame.id, repoPath: repo });
   }, []);
+
+  // Spawn a blank scratch note from the right-click menu: into the clicked frame
+  // when there is one, else through the global spawn path.
+  const menuNewFile = useCallback((frameId: string | null) => {
+    if (frameId) { spawnTile("file", frameId); return; }
+    spawnInto("file");
+  }, [spawnTile, spawnInto]);
+
+  // Blank scratch note requested from a frame's + menu (hivemind:frame-new-file).
+  useEffect(() => {
+    const onNew = (e: Event) => {
+      const fid = (e as CustomEvent<{ frameId?: string }>).detail?.frameId;
+      const frameId = fid ?? selectedFrameIdRef.current ?? framesRef.current[0]?.id;
+      if (frameId) spawnTile("file", frameId);
+    };
+    window.addEventListener("hivemind:frame-new-file", onNew as EventListener);
+    return () => window.removeEventListener("hivemind:frame-new-file", onNew as EventListener);
+  }, [spawnTile]);
+
+  // Blank scratch note tile: spawn a `file` tile with NO bound file — FileTile
+  // renders its in-memory note pad (jot something, save later if you want). Goes
+  // into the active/resolved frame like every other global spawn.
+  const newScratchFile = useCallback(() => {
+    spawnInto("file");
+  }, [spawnInto]);
+
+  // Save a scratch note → ask for a repo-relative path, write the buffer, then
+  // bind the tile to it (turning the scratch pad into a normal file tile). The
+  // path prompt is a tiny modal (scratchSave state) so it matches the app chrome.
+  const [scratchSave, setScratchSave] = useState<{ tileId: string; text: string; repoPath: string; draft: string } | null>(null);
+  const saveScratch = useCallback((tileId: string, text: string) => {
+    const fid = frameOfRef.current[tileId];
+    const f = fid ? framesRef.current.find((x) => x.id === fid) : undefined;
+    const repo = f?.worktreePath ?? f?.workspacePath ?? repoPathRef.current;
+    if (!repo) return;
+    setScratchSave({ tileId, text, repoPath: repo, draft: `notes-${new Date().toISOString().slice(0, 10)}.md` });
+  }, []);
+  const commitScratchSave = useCallback(async () => {
+    const s = scratchSave;
+    if (!s) return;
+    const rel = s.draft.trim().replace(/^\/+/, "");
+    if (!rel) return;
+    try {
+      await window.hive.fileWrite(s.repoPath, rel, s.text);
+      // Bind the tile to the saved path → it becomes a normal (editor-backed)
+      // file tile on the next render. Also rename its layer label to the file.
+      setTiles((cur) => cur.map((t) => (t.id === s.tileId ? { ...t, file: rel, label: rel.split("/").pop() ?? rel } : t)));
+    } catch {
+      /* write failed (bad path / permissions) — leave the note as-is so the
+         buffer isn't lost; the user can retry with a different name. */
+    }
+    setScratchSave(null);
+  }, [scratchSave]);
 
   // Rail context-menu actions — the SAME surface the on-canvas frame header
   // exposes, reused from the Layers rail (drives a workspace in windows mode,
@@ -1089,6 +1171,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     },
     onOpenFilePicker: (frameId: string) =>
       window.dispatchEvent(new CustomEvent("hivemind:frame-open-file", { detail: { frameId } })),
+    onNewFile: (frameId: string) => spawnTile("file", frameId),
     onCreateWorktree,
     onAttachWorktree,
     onBindWorkspace: (frameId: string) => bindWorkspace(frameId),
@@ -1110,7 +1193,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
       const f = framesRef.current.find((x) => x.id === frameId);
       return f?.worktreePath ?? f?.workspacePath ?? repoPath ?? null;
     },
-  }), [frameOpen, onCreateWorktree, onAttachWorktree, bindWorkspace, arrangeFrame, updateFrameTitle, updateFrameColor, deleteFrame, repoPath, repoOfFrame, gitPushMut, gitPullMut, reparentFrame, nestTargetsFor]);
+  }), [frameOpen, onCreateWorktree, onAttachWorktree, bindWorkspace, arrangeFrame, updateFrameTitle, updateFrameColor, deleteFrame, repoPath, repoOfFrame, gitPushMut, gitPullMut, reparentFrame, nestTargetsFor, spawnTile]);
   const openFileFromTerminal = useCallback((sourceTileId: string, path: string) => {
     const sourceFrameId = frameOfRef.current[sourceTileId] ?? selectedFrameIdRef.current;
     const existing = tilesRef.current.find((t) => (
@@ -1494,11 +1577,11 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     tileNames, agentTitles, frameTiles, framesChipNames,
     updateFrameTitle, updateFrameColor, deleteFrame, arrangeFrame, bringFrameToFront,
     onAttachWorktree, onCreateWorktree, unbindBranch, bindWorkspace, unbindWorkspace,
-    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, onNodeResizeCommit, renameTile, setAgentTitle,
+    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, saveScratch, onNodeResizeCommit, renameTile, setAgentTitle,
     onTogglePin: togglePin, onPinChange,
   }), [
     repoPath, root, cwd, tiles, editorTabs, browserOpenReqs, frames, frameOf, pinnedIds, sizes, positions,
-    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, updateFrameTitle, updateFrameColor,
+    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, saveScratch, updateFrameTitle, updateFrameColor,
     deleteFrame, arrangeFrame, bringFrameToFront, onAttachWorktree, onCreateWorktree,
     unbindBranch, onNodeResizeCommit, frameTiles, tileNames, bindWorkspace,
     // agentTitles intentionally NOT a dep: a live title change must not rebuild
@@ -1790,6 +1873,9 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
             onFocusTile={focusTileFromPanel}
             onFocusFrame={focusFrameFromPanel}
             frameActions={frameActions}
+            onReorderTiles={onReorderTilesFromPanel}
+            onReorderFrames={onReorderFramesFromPanel}
+            onReparentTile={onReparentTileFromPanel}
           />
         )}
         {/* Suppress the native context menu inside the canvas so RIGHT-mouse drag
@@ -1922,6 +2008,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
             <ToolIsland
               repoPath={repoPath}
               onToggle={(k) => spawnVis(k)}
+              onNewFile={() => newScratchFile()}
               agentSel={agentSel}
               onAgentChange={setAgentSel}
               onSpawnAgent={(a) => spawnAgent(a)}
@@ -2136,6 +2223,42 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
         onPick={(file) => { if (filePick) spawnTile("file", filePick.frameId, { file }); setFilePick(null); }}
       />
 
+      {/* Save-a-scratch-note prompt — asks for a repo-relative path, writes the
+          buffer, and binds the tile to it (scratch → normal file tile). */}
+      {scratchSave && (
+        <div className="fixed inset-0 z-[10000] grid place-items-center" onClick={() => setScratchSave(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative w-[420px] max-w-[92vw] rounded-xl border border-[var(--color-line)] bg-[var(--color-bg2)] shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="text-[13px] font-semibold text-[var(--color-fg)]">Save note</div>
+            <div className="mt-1 text-[11px] text-[var(--color-fg2)]">Path relative to the workspace root.</div>
+            <input
+              autoFocus
+              value={scratchSave.draft}
+              onChange={(e) => setScratchSave((s) => (s ? { ...s, draft: e.target.value } : s))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); commitScratchSave(); }
+                else if (e.key === "Escape") { e.preventDefault(); setScratchSave(null); }
+              }}
+              placeholder="notes.md"
+              spellCheck={false}
+              className="mt-3 w-full bg-[var(--color-bg)] border border-[var(--color-line2)] focus:border-[var(--color-brand)] rounded px-2.5 py-1.5 text-[13px] font-mono text-[var(--color-fg)] outline-none"
+              aria-label="file path"
+            />
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setScratchSave(null)}
+                className="px-2.5 py-1.5 rounded-md text-[12px] text-[var(--color-fg2)] hover:bg-[var(--color-bg3)] hover:text-[var(--color-fg)]"
+              >Cancel</button>
+              <button
+                onClick={() => commitScratchSave()}
+                disabled={!scratchSave.draft.trim()}
+                className="px-2.5 py-1.5 rounded-md text-[12px] font-medium text-white bg-[var(--color-brand)] hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
+              >Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Confirm before wiping the whole canvas (clear-all / reset layout). */}
       <ConfirmDialog
         open={confirmClear}
@@ -2155,6 +2278,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
           onSpawnAgent={menuSpawnAgent}
           onSpawnKind={menuSpawnKind}
           onSpawnFile={menuSpawnFile}
+          onNewFile={menuNewFile}
         />
       )}
     </div>

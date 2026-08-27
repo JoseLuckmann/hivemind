@@ -287,6 +287,8 @@ export function serializeIssue(issue: Issue): string {
     github: issue.github,
     links: issue.links,
     sync: issue.sync,
+    archived: issue.archived,
+    offline: issue.offline,
     created: issue.created,
     updated: issue.updated,
   }) as Record<string, unknown>;
@@ -300,6 +302,10 @@ export function serializeIssue(issue: Issue): string {
   if (fm.type === undefined) delete fm.type;
   if (fm.preferredFrame === undefined) delete fm.preferredFrame;
   if (fm.preferredAgent === undefined) delete fm.preferredAgent;
+  // archived/offline are boolean flags — write only when true, so the common
+  // (unset/false) case leaves no key and old files stay byte-stable on re-save.
+  if (!fm.archived) delete fm.archived;
+  if (!fm.offline) delete fm.offline;
   const body = serializeSections(issue.sections);
   return matter.stringify(body, fm);
 }
@@ -360,6 +366,8 @@ export async function listIssues(root: string): Promise<IssueSummary[]> {
         preferredAgent: d.preferredAgent,
         github: d.github,
         sync: d.sync,
+        archived: d.archived,
+        offline: d.offline,
         created: d.created,
         updated: d.updated,
         path: p,
@@ -563,6 +571,10 @@ export interface CreateIssueOpts {
   github?: number | null;
   /** Actor recorded in the creation activity entry. Default "ui". */
   who?: string;
+  /** Create the issue as OFFLINE — deliberately kept out of external-tracker
+   *  sync. Sets the `offline` frontmatter flag AND suppresses the pending sync
+   *  link even when a `sync` hint is passed, so the engine never touches it. */
+  offline?: boolean;
   /** External-tracker hint: the provider + work item type + area/board this
    *  issue should become on its first push. Stored as a "pending" sync link so
    *  the sync engine creates the remote item on the chosen board/type. */
@@ -594,6 +606,8 @@ export async function createIssue(root: string, opts: CreateIssueOpts): Promise<
     preferredFrame: opts.preferredFrame,
     preferredAgent: opts.preferredAgent,
     github: opts.github ?? null,
+    // Persist the OFFLINE flag only when set (serializer drops a falsey value).
+    offline: opts.offline || undefined,
     created: now,
     updated: now,
     path: issuePath(root, finalId),
@@ -613,8 +627,9 @@ export async function createIssue(root: string, opts: CreateIssueOpts): Promise<
   };
   // Stash the chosen tracker board/type as a "pending" sync link, so the next
   // sync creates the remote item on the right Area + work item type. Omit
-  // undefined-valued keys (the YAML dumper rejects `undefined`).
-  if (opts.sync?.provider) {
+  // undefined-valued keys (the YAML dumper rejects `undefined`). An OFFLINE
+  // issue is never linked — it stays local-only by design.
+  if (opts.sync?.provider && !opts.offline) {
     const link = Object.fromEntries(
       Object.entries({
         provider: opts.sync.provider,
@@ -698,6 +713,23 @@ export async function updateIssue(
   if (patch.github !== undefined && patch.github !== issue.github) {
     summary.push(`github: ${issue.github ?? "—"} → ${patch.github ?? "—"}`);
     issue.github = patch.github;
+  }
+  if (patch.archived !== undefined) {
+    // Normalize to a stored boolean (undefined ⇒ false semantics), and only log
+    // a real transition. `false` is stored as-is here but the serializer drops a
+    // falsey `archived` key, so it round-trips to "no key" (byte-stable).
+    const next = patch.archived || undefined;
+    if ((issue.archived ?? false) !== (next ?? false)) {
+      summary.push(next ? "archived" : "unarchived");
+      issue.archived = next;
+    }
+  }
+  if (patch.offline !== undefined) {
+    const next = patch.offline || undefined;
+    if ((issue.offline ?? false) !== (next ?? false)) {
+      summary.push(next ? "marked offline (sync disabled)" : "marked online (sync enabled)");
+      issue.offline = next;
+    }
   }
   if (patch.type !== undefined) {
     const next = patch.type ?? undefined;
