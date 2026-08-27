@@ -1,11 +1,22 @@
 /** Typed contract for IPC between main and renderer. */
 import type { Issue, IssueSummary, IssueState, AcceptanceItem, Assignee, LinkType, IssuePatch } from "@hivemind/core/types";
+import type { SyncReport } from "@hivemind/core/sync";
 import type { NotificationSettings } from "./notification-settings.js";
 export type { NotificationSettings };
+export type { SyncReport };
 
 // IssuePatch is owned by @hivemind/core/types (node-free) — re-export so renderer
 // modules keep importing it from the IPC contract, with no hand-maintained copy.
 export type { IssuePatch };
+
+/** A board's external-tracker sync config, as the renderer sees it — never
+ *  the secret itself, just whether one is saved. */
+export interface SyncBoardConfig {
+  providerId: string;
+  settings: Record<string, unknown>;
+  hasSecret: boolean;
+  lastSyncedAt: string | null;
+}
 
 /** A registered workspace (subset of the core registry entry — display shape
  *  for the renderer; avoids pulling node-only registry deps into the web tsconfig). */
@@ -228,6 +239,33 @@ export interface HiveIpc {
   updateIssue(root: string, id: string, patch: IssuePatch): Promise<Issue>;
   commentOnIssue(root: string, id: string, message: string): Promise<Issue>;
   deleteIssue(root: string, id: string): Promise<void>;
+
+  // ── external-tracker sync (Azure DevOps, ...) ───────────────
+  /** This board's sync config, or null if it isn't linked to a tracker.
+   *  `hasSecret` tells the UI whether a PAT is already saved — the secret
+   *  itself never crosses IPC. */
+  getSyncConfig(root: string): Promise<SyncBoardConfig | null>;
+  /** Save (or replace) this board's provider + settings. `secret` is
+   *  optional — omit it to keep whatever's already saved (e.g. when just
+   *  editing the area path). Pass `""` explicitly to clear it. */
+  setSyncConfig(
+    root: string,
+    providerId: string,
+    settings: Record<string, unknown>,
+    secret?: string,
+  ): Promise<void>;
+  /** Verifies `settings`/`secret` actually work, without saving anything. */
+  testSyncConnection(
+    root: string,
+    providerId: string,
+    settings: Record<string, unknown>,
+    secret?: string,
+  ): Promise<{ ok: boolean; error?: string }>;
+  /** Unlink this board from its tracker (config + secret). Existing issues'
+   *  `sync` links are left as-is — reconnecting the same provider resumes. */
+  clearSyncConfig(root: string): Promise<void>;
+  /** Run a sync pass now, using the board's saved config + secret. */
+  runSync(root: string): Promise<SyncReport>;
 
   // ── cross-repo (registry + transfer + links) ───────────────
   /** Every registered workspace (other repos) whose root still exists. */

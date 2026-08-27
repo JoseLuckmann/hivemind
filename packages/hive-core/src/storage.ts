@@ -21,12 +21,14 @@ import YAML from "yaml";
 import {
   ConfigZ,
   IssueFrontmatterZ,
+  SyncConfigZ,
   type AcceptanceItem,
   type ActivityEntry,
   type Config,
   type Issue,
   type IssuePatch,
   type IssueSections,
+  type SyncLink,
   type IssueSummary,
 } from "./types.js";
 
@@ -128,6 +130,7 @@ export async function readConfig(root: string): Promise<Config> {
         obj.agents && typeof obj.agents === "object" && !Array.isArray(obj.agents)
           ? (obj.agents as Config["agents"])
           : {},
+      sync: SyncConfigZ.safeParse(obj.sync).success ? (obj.sync as Config["sync"]) : null,
     };
     const final = ConfigZ.safeParse(repaired);
     if (!final.success) {
@@ -278,12 +281,15 @@ export function serializeIssue(issue: Issue): string {
     assignee: issue.assignee,
     github: issue.github,
     links: issue.links,
+    sync: issue.sync,
     created: issue.created,
     updated: issue.updated,
   }) as Record<string, unknown>;
-  // Omit `links` entirely when empty/absent so issues without cross-repo links
-  // don't grow a noisy `links: []` line across the whole vault on first save.
+  // Omit `links`/`sync` entirely when empty/absent so issues that don't use
+  // them don't grow a noisy `links: []`/`sync: []` line across the whole
+  // vault on first save.
   if (!Array.isArray(fm.links) || fm.links.length === 0) delete fm.links;
+  if (!Array.isArray(fm.sync) || fm.sync.length === 0) delete fm.sync;
   const body = serializeSections(issue.sections);
   return matter.stringify(body, fm);
 }
@@ -340,6 +346,7 @@ export async function listIssues(root: string): Promise<IssueSummary[]> {
         labels: d.labels,
         assignee: d.assignee,
         github: d.github,
+        sync: d.sync,
         created: d.created,
         updated: d.updated,
         path: p,
@@ -692,4 +699,50 @@ export async function commentOnIssue(
  */
 export async function deleteIssue(root: string, id: string): Promise<void> {
   await deleteIssueFile(root, id);
+}
+
+// ── external-tracker sync links ──────────────────────────────────
+
+/** Set (or replace) this issue's link to a `provider`'s remote item. At most
+ *  one link per provider — an existing link for the same provider is
+ *  overwritten. Used by the sync engine after a successful push/pull/create;
+ *  not a general-purpose patch field since it's engine-internal bookkeeping,
+ *  not something a user edits directly. */
+export async function setSyncLink(
+  root: string,
+  id: string,
+  link: SyncLink,
+  who: string = "sync",
+): Promise<Issue> {
+  const issue = await readIssue(root, id);
+  const rest = (issue.sync ?? []).filter((s) => s.provider !== link.provider);
+  const isNew = rest.length === (issue.sync ?? []).length;
+  issue.sync = [...rest, link];
+  appendActivity(
+    issue,
+    who,
+    isNew
+      ? `linked to ${link.provider} #${link.externalId}`
+      : `synced with ${link.provider} #${link.externalId}`,
+  );
+  await writeIssue(issue);
+  return issue;
+}
+
+/** Remove this issue's link to `provider`, if any. */
+export async function clearSyncLink(
+  root: string,
+  id: string,
+  provider: string,
+  who: string = "sync",
+): Promise<Issue> {
+  const issue = await readIssue(root, id);
+  const before = issue.sync ?? [];
+  const after = before.filter((s) => s.provider !== provider);
+  if (after.length !== before.length) {
+    issue.sync = after;
+    appendActivity(issue, who, `unlinked from ${provider}`);
+    await writeIssue(issue);
+  }
+  return issue;
 }

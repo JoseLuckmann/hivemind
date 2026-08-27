@@ -5,3 +5,4 @@ export * from "./agent-context.js";
 export * from "./registry.js";
 export * from "./cross-repo.js";
 export * as templates from "./templates.js";
+export * as sync from "./sync/index.js";

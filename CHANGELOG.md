@@ -7,6 +7,14 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+### Added
+
+- **Sync a board with Azure DevOps.** Click the gear icon on an Issues board to link it to an
+  Azure DevOps project (org/project/area path + a Personal Access Token) and pull in its work
+  items or push local issues out to it. The hivemind issue stays canonical; the sync engine and
+  provider abstraction live in `@hivemind/core/sync` so other trackers (Jira, Google Tasks, ...)
+  are a new provider file away. Manual "Sync now" for v1 — no background polling yet.
+
 ## [1.16.0-flow.1] — 2026-08-26
 
 ### Added

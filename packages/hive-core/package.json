@@ -13,7 +13,8 @@
     "./agent-context": "./src/agent-context.ts",
     "./registry": "./src/registry.ts",
     "./cross-repo": "./src/cross-repo.ts",
-    "./templates": "./src/templates.ts"
+    "./templates": "./src/templates.ts",
+    "./sync": "./src/sync/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

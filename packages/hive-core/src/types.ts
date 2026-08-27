@@ -51,6 +51,34 @@ export const IssueLinkZ = z.object({
 });
 export type IssueLink = z.infer<typeof IssueLinkZ>;
 
+/** A link from this issue to its mirror in an external tracker (Azure DevOps,
+ *  and later Jira/Google Tasks/etc.). The hivemind issue stays canonical —
+ *  this is just enough state for the sync engine to find its remote
+ *  counterpart and tell a real edit apart from its own last write. */
+export const SyncLinkZ = z.object({
+  /** Provider id, e.g. "azure-devops" — matches `SyncProvider.id`. */
+  provider: z.string().min(1),
+  /** The remote system's id for this item (Azure DevOps work item id). */
+  externalId: z.string().min(1),
+  /** Deep link back to the remote item, for UI. */
+  url: z.string().optional(),
+  /** Opaque remote revision/version marker (Azure's `System.Rev`) — cheap
+   *  "did the remote side change" check without comparing full payloads. */
+  remoteRev: z.string().optional(),
+  /** Hash of the synced fields (title/description/acceptance criteria/state/
+   *  labels) as of the last successful sync — "did a human change something
+   *  sync cares about" without re-diffing full payloads. NOT `issue.updated`:
+   *  that timestamp bumps on every write (including the engine's own pulls)
+   *  and can collide at millisecond resolution between back-to-back writes,
+   *  so it can't reliably distinguish "we just wrote this" from "a real edit
+   *  landed in the same millisecond". A content hash has neither problem,
+   *  and also ignores edits to fields sync doesn't touch (assignee, parent). */
+  localFieldsHash: z.string().optional(),
+  /** When this link was last successfully synced. */
+  syncedAt: IsoZ.optional(),
+});
+export type SyncLink = z.infer<typeof SyncLinkZ>;
+
 /** YAML frontmatter schema for an issue file. */
 export const IssueFrontmatterZ = z.object({
   id: IssueIdZ,
@@ -64,6 +92,10 @@ export const IssueFrontmatterZ = z.object({
   // literals and on-disk files without the field stay valid without churn;
   // read it as `issue.links ?? []`.
   links: z.array(IssueLinkZ).optional(),
+  // Links to mirrors in external trackers (Azure DevOps, ...). Same
+  // optional-not-defaulted convention as `links` above; read as
+  // `issue.sync ?? []`. At most one entry per `provider`.
+  sync: z.array(SyncLinkZ).optional(),
   created: IsoZ,
   updated: IsoZ,
 });
@@ -114,6 +146,7 @@ export interface IssueSummary
     | "labels"
     | "assignee"
     | "github"
+    | "sync"
     | "created"
     | "updated"
   > {
@@ -136,6 +169,17 @@ export type IssuePatch = Partial<{
   extra: string;
 }>;
 
+/** Non-secret sync settings for this board's ONE active external-tracker
+ *  link (e.g. `{ providerId: "azure-devops", settings: { organization, project, ... } }`).
+ *  `settings` is provider-shaped and validated by that provider's own zod
+ *  schema (see `sync/types.ts`), not here — this stays provider-agnostic.
+ *  The credential (PAT) is never stored here; see the desktop secret store. */
+export const SyncConfigZ = z.object({
+  providerId: z.string().min(1),
+  settings: z.record(z.string(), z.unknown()),
+});
+export type SyncConfig = z.infer<typeof SyncConfigZ>;
+
 export const ConfigZ = z.object({
   prefix: z.string().regex(/^[A-Z][A-Z0-9]{1,9}$/, "prefix must be UPPERCASE 2-10 chars"),
   next_id: z.number().int().positive(),
@@ -148,6 +192,7 @@ export const ConfigZ = z.object({
       })
     )
     .default({}),
+  sync: SyncConfigZ.nullable().default(null),
 });
 export type Config = z.infer<typeof ConfigZ>;
 

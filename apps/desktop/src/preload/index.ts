@@ -51,6 +51,14 @@ const api: HiveIpc & {
     ipcRenderer.invoke("commentOnIssue", root, id, message),
   deleteIssue: (root, id) => ipcRenderer.invoke("deleteIssue", root, id),
 
+  getSyncConfig: (root) => ipcRenderer.invoke("getSyncConfig", root),
+  setSyncConfig: (root, providerId, settings, secret) =>
+    ipcRenderer.invoke("setSyncConfig", root, providerId, settings, secret),
+  testSyncConnection: (root, providerId, settings, secret) =>
+    ipcRenderer.invoke("testSyncConnection", root, providerId, settings, secret),
+  clearSyncConfig: (root) => ipcRenderer.invoke("clearSyncConfig", root),
+  runSync: (root) => ipcRenderer.invoke("runSync", root),
+
   listWorkspaces: () => ipcRenderer.invoke("listWorkspaces"),
   resolveIssueRoot: (id) => ipcRenderer.invoke("resolveIssueRoot", id),
   moveIssue: (root, id, destPrefix, mode) =>

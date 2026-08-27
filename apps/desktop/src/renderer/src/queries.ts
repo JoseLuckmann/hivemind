@@ -188,6 +188,80 @@ export function useCommentOnIssue() {
   });
 }
 
+// ── external-tracker sync ──────────────────────────────────────────────
+
+export function useSyncConfig(root: string | null | undefined) {
+  return useQuery<import("../../shared/ipc").SyncBoardConfig | null>({
+    queryKey: ["sync", root],
+    queryFn: () => (root ? window.hive.getSyncConfig(root) : Promise.resolve(null)),
+    enabled: !!root,
+  });
+}
+
+export function useSetSyncConfig() {
+  const qc = useQueryClient();
+  return useMutation<
+    void,
+    Error,
+    { root: string; providerId: string; settings: Record<string, unknown>; secret?: string }
+  >({
+    mutationFn: ({ root, providerId, settings, secret }) =>
+      window.hive.setSyncConfig(root, providerId, settings, secret),
+    onSuccess: (_d, { root }) => {
+      qc.invalidateQueries({ queryKey: ["sync", root] });
+      toast.success("sync settings saved");
+    },
+    onError: (e) => toast.error("save failed", { description: e.message }),
+  });
+}
+
+export function useTestSyncConnection() {
+  return useMutation<
+    { ok: boolean; error?: string },
+    Error,
+    { root: string; providerId: string; settings: Record<string, unknown>; secret?: string }
+  >({
+    mutationFn: ({ root, providerId, settings, secret }) =>
+      window.hive.testSyncConnection(root, providerId, settings, secret),
+  });
+}
+
+export function useClearSyncConfig() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { root: string }>({
+    mutationFn: ({ root }) => window.hive.clearSyncConfig(root),
+    onSuccess: (_d, { root }) => {
+      qc.invalidateQueries({ queryKey: ["sync", root] });
+      toast.success("disconnected");
+    },
+    onError: (e) => toast.error("disconnect failed", { description: e.message }),
+  });
+}
+
+export function useRunSync() {
+  const qc = useQueryClient();
+  return useMutation<import("../../shared/ipc").SyncReport, Error, { root: string }>({
+    mutationFn: ({ root }) => window.hive.runSync(root),
+    onSuccess: (report, { root }) => {
+      qc.invalidateQueries({ queryKey: ["sync", root] });
+      qc.invalidateQueries({ queryKey: ["issues", root] });
+      const parts = [
+        report.pushed && `${report.pushed} pushed`,
+        report.pulled && `${report.pulled} pulled`,
+        report.created && `${report.created} created`,
+      ].filter(Boolean);
+      if (report.errors.length > 0) {
+        toast.error(`sync finished with ${report.errors.length} error(s)`, {
+          description: report.errors.map((e) => e.message).join("; "),
+        });
+      } else {
+        toast.success(parts.length > 0 ? `synced: ${parts.join(", ")}` : "already up to date");
+      }
+    },
+    onError: (e) => toast.error("sync failed", { description: e.message }),
+  });
+}
+
 // ── cross-repo: workspaces, transfer, links ───────────────────────────────
 
 export function useWorkspaces() {
