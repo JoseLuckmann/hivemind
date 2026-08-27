@@ -8,6 +8,10 @@ export interface Filters {
   states: Set<IssueState>;
   labels: Set<string>;
   assignees: Set<string>;
+  /** Optional filter on the external work item type (Azure "Task"/"Bug"/…),
+   *  read from an issue's sync link. Empty ⇒ show every type (the default: my
+   *  tasks/stories/bugs are all shown, filtering by type is opt-in). */
+  types: Set<string>;
   /** When true, BoardView/ListView render the Cancelled column/group. */
   showCancelled: boolean;
 }
@@ -17,8 +21,15 @@ export const emptyFilters = (): Filters => ({
   states: new Set(),
   labels: new Set(),
   assignees: new Set(),
+  types: new Set(),
   showCancelled: false,
 });
+
+/** The external work item type an issue is, from its sync link (first link that
+ *  carries one). Undefined for issues with no synced type. */
+export function issueWorkItemType(i: IssueSummary): string | undefined {
+  return (i.sync ?? []).map((s) => s.workItemType).find((t): t is string => !!t);
+}
 
 export function applyFilters(issues: IssueSummary[], f: Filters): IssueSummary[] {
   const q = f.q.trim().toLowerCase();
@@ -26,6 +37,10 @@ export function applyFilters(issues: IssueSummary[], f: Filters): IssueSummary[]
     if (f.states.size > 0 && !f.states.has(i.state)) return false;
     if (f.labels.size > 0 && !i.labels.some((l) => f.labels.has(l))) return false;
     if (f.assignees.size > 0 && !(i.assignee && f.assignees.has(i.assignee.id))) return false;
+    if (f.types.size > 0) {
+      const t = issueWorkItemType(i);
+      if (!t || !f.types.has(t)) return false;
+    }
     if (q && !i.title.toLowerCase().includes(q) && !i.id.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -52,6 +67,14 @@ export function FilterBar({
     issues.forEach((i) => i.assignee && s.add(i.assignee.id));
     return Array.from(s).sort();
   }, [issues]);
+  const allTypes = useMemo(() => {
+    const s = new Set<string>();
+    issues.forEach((i) => {
+      const t = issueWorkItemType(i);
+      if (t) s.add(t);
+    });
+    return Array.from(s).sort();
+  }, [issues]);
 
   const setField = <K extends keyof Filters>(k: K, v: Filters[K]) =>
     onChange({ ...filters, [k]: v });
@@ -71,6 +94,9 @@ export function FilterBar({
   );
   filters.assignees.forEach((a) =>
     activeChips.push({ kind: "assignee", value: `@${a}`, remove: () => setField("assignees", toggleIn(filters.assignees, a)) }),
+  );
+  filters.types.forEach((t) =>
+    activeChips.push({ kind: "type", value: t, remove: () => setField("types", toggleIn(filters.types, t)) }),
   );
 
   return (
@@ -115,6 +141,18 @@ export function FilterBar({
             }))}
           />
         )}
+        {allTypes.length > 0 && (
+          <Dropdown
+            label="Type"
+            count={filters.types.size}
+            options={allTypes.map((t) => ({
+              key: t,
+              label: t,
+              selected: filters.types.has(t),
+              toggle: () => setField("types", toggleIn(filters.types, t)),
+            }))}
+          />
+        )}
         <button
           onClick={() => setField("showCancelled", !filters.showCancelled)}
           title={filters.showCancelled ? "Hide cancelled" : "Show cancelled"}
@@ -126,7 +164,7 @@ export function FilterBar({
         >
           {filters.showCancelled ? "Hide cancelled" : "Show cancelled"}
         </button>
-        {(filters.states.size + filters.labels.size + filters.assignees.size > 0 || filters.q || filters.showCancelled) && (
+        {(filters.states.size + filters.labels.size + filters.assignees.size + filters.types.size > 0 || filters.q || filters.showCancelled) && (
           <button
             onClick={() => onChange(emptyFilters())}
             className="text-[11px] text-[var(--color-fg2)] hover:text-[var(--color-fg)] px-1.5 py-1 rounded-md cursor-pointer"

@@ -41,7 +41,12 @@ export function SyncSettingsModal({ root, onClose }: Props) {
   const [organization, setOrganization] = useState("");
   const [project, setProject] = useState("");
   const [areaPath, setAreaPath] = useState("");
-  const [workItemType, setWorkItemType] = useState("Task");
+  // Comma/newline-separated list of work item types to pull (Task, Bug, User
+  // Story, …). The first is the default type for new items.
+  const [workItemTypes, setWorkItemTypes] = useState("Task");
+  // The current user's Azure identity (UPN/email). When set, the board pulls
+  // only items assigned to them — "my tasks across every board".
+  const [assignedTo, setAssignedTo] = useState("");
   const [pat, setPat] = useState("");
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const firstInput = useRef<HTMLInputElement>(null);
@@ -54,7 +59,15 @@ export function SyncSettingsModal({ root, onClose }: Props) {
     setOrganization(typeof s?.organization === "string" ? s.organization : "");
     setProject(typeof s?.project === "string" ? s.project : "");
     setAreaPath(typeof s?.areaPath === "string" ? s.areaPath : "");
-    setWorkItemType(typeof s?.workItemType === "string" ? s.workItemType : "Task");
+    // Prefer the new `workItemTypes` array; fall back to a legacy single string.
+    if (Array.isArray(s?.workItemTypes)) {
+      setWorkItemTypes((s!.workItemTypes as unknown[]).filter((t): t is string => typeof t === "string").join(", "));
+    } else if (typeof s?.workItemType === "string") {
+      setWorkItemTypes(s.workItemType);
+    } else {
+      setWorkItemTypes("Task");
+    }
+    setAssignedTo(typeof s?.assignedTo === "string" ? s.assignedTo : "");
     const t = setTimeout(() => firstInput.current?.focus(), 30);
     return () => clearTimeout(t);
   }, [root, config]);
@@ -73,7 +86,15 @@ export function SyncSettingsModal({ root, onClose }: Props) {
     organization: organization.trim(),
     project: project.trim(),
     areaPath: areaPath.trim() || undefined,
-    workItemType: workItemType.trim() || "Task",
+    // Split on comma/newline, trim, drop blanks; keep at least "Task".
+    workItemTypes: (() => {
+      const list = workItemTypes
+        .split(/[,\n]/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+      return list.length ? list : ["Task"];
+    })(),
+    assignedTo: assignedTo.trim() || undefined,
   };
   const hasCredential = !!pat || !!config?.hasSecret;
   const canSubmit = !!settings.organization && !!settings.project && hasCredential;
@@ -153,11 +174,27 @@ export function SyncSettingsModal({ root, onClose }: Props) {
           </label>
 
           <label className="grid gap-1">
-            <span className="u-eyebrow">Work item type</span>
+            <span className="u-eyebrow">
+              Work item types{" "}
+              <span className="lowercase tracking-normal text-[var(--color-fg3)]">(comma-separated; first is the default)</span>
+            </span>
             <input
-              value={workItemType}
-              onChange={(e) => setWorkItemType(e.target.value)}
-              placeholder="Task"
+              value={workItemTypes}
+              onChange={(e) => setWorkItemTypes(e.target.value)}
+              placeholder="Task, Bug, User Story"
+              className={inputClass}
+            />
+          </label>
+
+          <label className="grid gap-1">
+            <span className="u-eyebrow">
+              Assigned to{" "}
+              <span className="lowercase tracking-normal text-[var(--color-fg3)]">(your email — pulls only your items)</span>
+            </span>
+            <input
+              value={assignedTo}
+              onChange={(e) => setAssignedTo(e.target.value)}
+              placeholder="you@example.com"
               className={inputClass}
             />
           </label>

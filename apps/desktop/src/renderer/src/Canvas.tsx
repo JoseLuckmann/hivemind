@@ -1029,7 +1029,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
   // grown frame never overlaps a neighbour. We only pick the new tile's slot.
   // Tile spawning + in-frame placement (placeInFrame / ensureFrame / spawnTile
   // + spawnInto/spawnClaude/spawnVis/frameOpen). See useSpawn.
-  const { spawnTile, spawnClaude, spawnAgent, spawnVis, spawnInto, frameOpen, openPlanReview, hcpSpawnAgent } = useSpawn({
+  const { spawnTile, spawnClaude, spawnAgent, spawnVis, spawnInto, frameOpen, openPlanReview, hcpSpawnAgent, ensureFrame } = useSpawn({
     repoPath, claudeMode, claudeModel,
     positionsRef, sizesRef, tilesRef, frameOfRef, framesRef, selectedFrameIdRef,
     selectedTileIdRef, repoPathRef, rootRef, lastActiveFrameRef, claudeSeqRef,
@@ -1501,6 +1501,50 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     window.addEventListener("hivemind:deliver-to-claude", onDeliver as EventListener);
     return () => window.removeEventListener("hivemind:deliver-to-claude", onDeliver as EventListener);
   }, [spawnClaude]);
+
+  // "Work on this task": spawn the TASK'S agent in the TASK'S workspace, and
+  // hand it the task reference. Resolution:
+  //   • Workspace: the frame whose workspaceRoot/workspacePath matches the
+  //     issue's `.hivemind` root (so the agent runs in the right repo/cwd). Fall
+  //     back to the active frame when nothing matches.
+  //   • Agent: the agent assigned to the task (issue.assignee, type=agent) if
+  //     it's a known registry agent; else the island's selected agent; else
+  //     claude. A custom-catalog id we don't recognize still spawns claude (a
+  //     safe generic) carrying the task prompt.
+  //   • Prompt: names the issue id + title and tells the agent to load it via
+  //     hive_get_issue and treat later "faça isso" as scoped to THIS task.
+  useEffect(() => {
+    const onWork = (e: Event) => {
+      const d = (e as CustomEvent<{ root: string | null; id: string; title?: string; agent?: string; model?: string }>).detail;
+      if (!d?.id) return;
+      const norm = (p?: string | null) => (p ? p.replace(/\/+$/, "").replace(/\/\.hivemind$/, "") : "");
+      const issueRepo = norm(d.root);
+      // Prefer a frame bound to the issue's workspace (by root or repo path).
+      const frame =
+        framesRef.current.find(
+          (f) => norm(f.workspaceRoot) === norm(d.root) || (!!issueRepo && norm(f.workspacePath) === issueRepo),
+        ) ?? undefined;
+      const reg = d.agent ? agentById(d.agent) : undefined;
+      const work =
+        `You are working on task ${d.id}${d.title ? ` — "${d.title}"` : ""}. ` +
+        `First load it with hive_get_issue ${d.id} to read the description and acceptance criteria. ` +
+        `Implement it end-to-end, tick acceptance criteria as you go, and finish by setting its state with hive_set_state. ` +
+        `Treat any later instruction like "faça isso"/"do this" as referring to THIS task (${d.id}) — re-read it with hive_get_issue if unsure.`;
+      const targetFrameId = frame?.id ?? ensureFrame().id;
+      // A recognized registry agent (codex/opencode/…) spawns with its binary;
+      // claude (or an unknown/custom id) spawns as claude carrying the prompt.
+      if (reg && reg.id !== "claude") {
+        spawnTile("claude", targetFrameId, {
+          agent: { id: reg.id, cmd: reg.cmd, args: reg.defaultArgs, label: reg.label },
+          work,
+        });
+      } else {
+        spawnTile("claude", targetFrameId, { work });
+      }
+    };
+    window.addEventListener("hivemind:work-on-issue", onWork as EventListener);
+    return () => window.removeEventListener("hivemind:work-on-issue", onWork as EventListener);
+  }, [spawnTile, ensureFrame]);
 
   // Spawn the island's CURRENTLY-selected agent (key "2"), reading agentSel via
   // a ref so the stable callback always uses the latest selection.

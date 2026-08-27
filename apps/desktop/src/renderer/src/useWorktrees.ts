@@ -43,8 +43,18 @@ export function useWorktrees(ctx: WorktreesCtx) {
   // The repo a frame's worktrees live under: a workspace zone's bound repo,
   // else the canvas base repo.
   const frameRepo = useCallback((frameId: string): string | null => {
-    const f = framesRef.current.find((x) => x.id === frameId);
-    return f?.workspacePath ?? repoPathRef.current ?? null;
+    // Walk UP the parentFrameId chain to the nearest frame that carries a repo
+    // binding — a worktree zone or a bound workspace folder — so worktrees can
+    // be created under a NESTED frame (N-level nesting), not just a top-level
+    // repo frame. Cycle-/depth-guarded; falls back to the canvas base repo.
+    let cur = framesRef.current.find((x) => x.id === frameId);
+    for (let i = 0; i < 64 && cur; i++) {
+      if (cur.worktreePath) return cur.worktreePath;
+      if (cur.workspacePath) return cur.workspacePath;
+      const pid = cur.parentFrameId;
+      cur = pid ? framesRef.current.find((x) => x.id === pid) : undefined;
+    }
+    return repoPathRef.current ?? null;
   }, [framesRef, repoPathRef]);
 
   // Spawn a worktree sub-frame nested in repo frame `parentId`, packed beside
@@ -54,8 +64,10 @@ export function useWorktrees(ctx: WorktreesCtx) {
     (parentId: string, wt: { branch: string; path: string; head: string }) => {
       const parent = framesRef.current.find((f) => f.id === parentId);
       if (!parent) return;
-      // Nesting is exactly 2 levels (repo → worktree). Never nest under a child.
-      if (parent.parentFrameId) return;
+      // N-level nesting: a worktree sub-frame may be spawned under ANY frame
+      // (repo, workspace, or another worktree/group), not just a top-level repo.
+      // The enclosing repo the worktree is created against is resolved by
+      // frameRepo() walking UP the parent chain.
       const dup = framesRef.current.find(
         (f) => f.parentFrameId === parentId && f.worktreePath === wt.path,
       );

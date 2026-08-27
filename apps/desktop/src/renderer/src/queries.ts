@@ -249,6 +249,7 @@ export function useRunSync() {
         report.pushed && `${report.pushed} pushed`,
         report.pulled && `${report.pulled} pulled`,
         report.created && `${report.created} created`,
+        report.skippedLocalOnly && `${report.skippedLocalOnly} local-only kept`,
       ].filter(Boolean);
       if (report.errors.length > 0) {
         toast.error(`sync finished with ${report.errors.length} error(s)`, {
@@ -259,6 +260,21 @@ export function useRunSync() {
       }
     },
     onError: (e) => toast.error("sync failed", { description: e.message }),
+  });
+}
+
+/** Explicitly move an issue's REMOTE board state (Azure column). Separate from
+ *  the local Kanban state, which the board owns. */
+export function useSetRemoteState() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { root: string; id: string; state: import("@hivemind/core/types").IssueState }>({
+    mutationFn: ({ root, id, state }) => window.hive.setRemoteState(root, id, state),
+    onSuccess: (_r, { root }) => {
+      qc.invalidateQueries({ queryKey: ["issues", root] });
+      qc.invalidateQueries({ queryKey: ["issue", root] });
+      toast.success("moved on the remote board");
+    },
+    onError: (e) => toast.error("couldn't move the remote item", { description: e.message }),
   });
 }
 

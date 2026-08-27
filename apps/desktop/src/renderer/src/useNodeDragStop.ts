@@ -54,30 +54,55 @@ export function useNodeDragStop(ctx: NodeDragStopCtx) {
       //   • drag a top-level frame's center into a repo frame → nest under it.
       //   • drag a child's center out of its parent → detach (top-level).
       //   • drag a child's center straight into a DIFFERENT repo frame → reparent.
-      // Depth is capped at 2 (repo → worktree): a candidate parent must itself be
-      // top-level, and a frame that already HAS children can't become a child.
+      // N-level nesting: a candidate parent may be ANY frame (nested or not) as
+      // long as it isn't the dragged frame itself or one of its OWN descendants
+      // (that would create a cycle). Innermost frame under the center wins so a
+      // drop into a deeply-nested area picks the deepest legal parent.
       const ccx = nx + old.w / 2, ccy = ny + old.h / 2;
-      const hasChildren = framesRef.current.some((f) => f.parentFrameId === node.id);
       const inside = (f: FrameState) =>
         ccx >= f.x && ccx <= f.x + f.w && ccy >= f.y && ccy <= f.y + f.h;
-      // Topmost eligible parent under the frame's center (z-desc), excluding
-      // itself and any candidate that is already a child (2-level rule).
-      const target = hasChildren
-        ? undefined
-        : [...framesRef.current]
-            .filter((f) => f.id !== node.id && !f.parentFrameId && inside(f))
-            .sort((a, b) => b.z - a.z)[0];
+      // The dragged frame's whole subtree (itself + all descendants) — both to
+      // exclude them as drop targets (no cycle) and to move them as one body.
+      const subtree = (() => {
+        const kidsOf = new Map<string, string[]>();
+        for (const f of framesRef.current) {
+          if (!f.parentFrameId) continue;
+          (kidsOf.get(f.parentFrameId) ?? kidsOf.set(f.parentFrameId, []).get(f.parentFrameId)!).push(f.id);
+        }
+        const set = new Set<string>([node.id]);
+        const stack = [node.id];
+        while (stack.length) {
+          const cur = stack.pop()!;
+          for (const c of kidsOf.get(cur) ?? []) if (!set.has(c)) { set.add(c); stack.push(c); }
+        }
+        return set;
+      })();
+      // Depth of a frame (for innermost-wins), cycle-guarded.
+      const depthOf = (f: FrameState): number => {
+        let d = 0;
+        let cur: FrameState | undefined = f;
+        for (let i = 0; i < 64 && cur?.parentFrameId; i++) {
+          const p: FrameState | undefined = framesRef.current.find((x) => x.id === cur!.parentFrameId);
+          if (!p) break;
+          d++; cur = p;
+        }
+        return d;
+      };
+      // Topmost-then-deepest eligible parent under the center, excluding the
+      // dragged frame's own subtree. Prefer greater depth (innermost), then z.
+      const target = [...framesRef.current]
+        .filter((f) => !subtree.has(f.id) && inside(f))
+        .sort((a, b) => depthOf(b) - depthOf(a) || b.z - a.z)[0];
       // What the parent SHOULD be after this drop: the hit frame, or none.
       const nextParent = target?.id;
       const parentChanged = nextParent !== old.parentFrameId;
       if (dx !== 0 || dy !== 0 || parentChanged) {
-        // Everything that moves with this frame: its descendant child frames, plus
-        // every member tile of the frame AND its descendants. Shifting member tiles
-        // re-lands non-empty frames; shifting frame x/y re-lands empty ones.
-        const descendants = framesRef.current
-          .filter((f) => f.parentFrameId === node.id)
-          .map((f) => f.id);
-        const movedFrames = new Set<string>([node.id, ...descendants]);
+        // Everything that moves with this frame: its ENTIRE descendant subtree,
+        // plus every member tile of the frame AND its descendants. Shifting
+        // member tiles re-lands non-empty frames; shifting frame x/y re-lands
+        // empty ones.
+        const movedFrames = subtree;
+        const descendants = [...subtree].filter((id) => id !== node.id);
         const moveIds = Object.keys(frameOfRef.current).filter((tid) =>
           movedFrames.has(frameOfRef.current[tid]!),
         );

@@ -64,35 +64,39 @@ export function BoardView({
             onDragOver={droppable ? (e) => { e.preventDefault(); setOverKey(g.key); } : undefined}
             onDragLeave={droppable ? () => setOverKey((k) => (k === g.key ? null : k)) : undefined}
             onDrop={droppable ? (e) => { e.preventDefault(); dropOn(g); } : undefined}
-            className={`flex flex-col w-[220px] shrink-0 rounded-lg hm-soft ${
+            className={`flex flex-col w-[220px] shrink-0 h-full min-h-0 rounded-lg hm-soft ${
               overKey === g.key
                 ? "bg-[var(--color-bg4)] ring-1 ring-[var(--color-brand)]"
                 : "bg-[color-mix(in_srgb,var(--color-bg3)_50%,transparent)]"
             }`}
           >
-            <div className="flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-semibold text-[var(--color-fg2)]">
+            <div className="flex items-center gap-1.5 px-2.5 py-2 shrink-0 text-[11px] font-semibold text-[var(--color-fg2)]">
               {g.header}
               <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-mono tabular-nums bg-[var(--color-bg4)] text-[var(--color-fg3)]">
                 {g.items.length}
               </span>
             </div>
-            <div className="flex flex-col gap-2 px-1.5 pb-2 overflow-y-auto">
+            {/* Card list owns the vertical scroll: a column with many issues
+             *  scrolls internally (flex-1 + min-h-0 bounds it against the column
+             *  height) instead of stretching and squishing every card. */}
+            <div className="flex-1 min-h-0 flex flex-col gap-2 px-1.5 pb-2 overflow-y-auto">
               {g.items.map((issue) => (
-                <IssueCard
-                  key={issue.id}
-                  issue={issue}
-                  root={root}
-                  onWork={() => onWork(issue)}
-                  draggable={selected}
-                  onDragStart={(e) => {
-                    dragId.current = issue.id;
-                    e.dataTransfer.effectAllowed = "move";
-                  }}
-                  onDragEnd={() => {
-                    dragId.current = null;
-                    setOverKey(null);
-                  }}
-                />
+                <div key={issue.id} className="shrink-0">
+                  <IssueCard
+                    issue={issue}
+                    root={root}
+                    onWork={() => onWork(issue)}
+                    draggable={selected}
+                    onDragStart={(e) => {
+                      dragId.current = issue.id;
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    onDragEnd={() => {
+                      dragId.current = null;
+                      setOverKey(null);
+                    }}
+                  />
+                </div>
               ))}
               {g.items.length === 0 && (
                 <div className="text-[10.5px] text-[var(--color-fg3)] px-2 py-3 rounded-md border border-dashed border-[var(--color-line2)] text-center">

@@ -44,6 +44,7 @@ import {
 } from "./remote/pty.js";
 import { readRemoteFile, writeRemoteFile } from "./remote/git.js";
 import { remoteConns, type HostAuth } from "./remote/conn.js";
+import { resolveProjectPaths } from "./resolve-project.js";
 // tmux-style persistence is ON by default — terminal sessions live in a
 // detached daemon and survive the window closing. No user-facing flag.
 // `HIVEMIND_PTY_DAEMON=0` is an internal escape hatch (debugging / a hostile
@@ -497,13 +498,13 @@ function wrap<A extends unknown[], R>(
 // hive-core
 ipcMain.handle("resolveProject", wrap(async (e, rootHint?: string) => {
   const cwd = rootHint ?? process.cwd();
-  const root = await findRoot(cwd);
-  // Fallback: if there's no .hivemind/ workspace, walk up to find a .git/
-  // dir. The diff + file-tree tiles only need a git repo (they call `git
-  // diff`, `git ls-files`, `git show :file`) — gating them on .hivemind/
-  // existing made them dead-on-arrival for any user who hadn't run
-  // `hive init` yet. Issues still need a real root.
-  const repoPath = root ? path.dirname(root) : await findGitRoot(cwd);
+  const foundRoot = await findRoot(cwd);
+  // The git repo containing the PICKED dir. This is authoritative for what the
+  // user actually selected — its own .git, not an ancestor's. See
+  // resolveProjectPaths for the precedence rule + the child-repo bug it fixes.
+  const gitRoot = await findGitRoot(cwd);
+  const { root, repoPath } = resolveProjectPaths(foundRoot, gitRoot);
+
   if (repoPath) watchRepo(repoPath, e.sender);
   // Index this workspace so cross-repo move/link/open can resolve its prefix.
   if (root) await registerWorkspace(root).catch(() => {});
@@ -1037,6 +1038,20 @@ ipcMain.handle(
     const report = await sync.runSync(root, provider, config, secret);
     await writeAgentContext(root);
     return report;
+  })
+);
+ipcMain.handle(
+  "setRemoteState",
+  wrap(async (_e, root: string, id: string, state: IssueState) => {
+    const cfg = await readConfig(root);
+    if (!cfg.sync) throw new Error("this board isn't linked to a tracker");
+    const provider = sync.syncProviderFor(cfg.sync.providerId);
+    if (!provider) throw new Error(`unknown sync provider: ${cfg.sync.providerId}`);
+    const secret = getSyncSecret(root, cfg.sync.providerId);
+    if (!secret) throw new Error("no credential saved for this tracker");
+    const config = provider.parseConfig(cfg.sync.settings);
+    await sync.setRemoteState(root, provider, config, secret, id, state);
+    await writeAgentContext(root);
   })
 );
 

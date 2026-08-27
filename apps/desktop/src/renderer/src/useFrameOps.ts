@@ -65,12 +65,32 @@ export function useFrameOps(ctx: FrameOpsCtx) {
     setFrames((fs) => fs.map((f) => (f.id === id ? { ...f, color } : f)));
   }, [setFrames]);
   const deleteFrame = useCallback((id: string) => {
-    // Removing a repo frame also removes its worktree SUB-frames from the
-    // canvas — otherwise a child's parentFrameId dangles and computeFrameLayout
-    // silently promotes it to a top-level frame. The worktrees stay on DISK
+    // Removing a repo/group frame also removes its ENTIRE descendant subtree
+    // (children, grandchildren, …) from the canvas — otherwise a descendant's
+    // parentFrameId dangles and computeFrameLayout silently promotes it to a
+    // top-level frame. With N-level nesting a single-level filter left
+    // grandchildren orphaned; walk the tree. The worktrees stay on DISK
     // (re-attachable via the picker); the destructive removal is the explicit
     // detach (×) on a worktree frame, not a canvas delete.
-    setFrames((fs) => fs.filter((f) => f.id !== id && f.parentFrameId !== id));
+    setFrames((fs) => {
+      const childrenOf = new Map<string, string[]>();
+      for (const f of fs) {
+        if (!f.parentFrameId) continue;
+        (childrenOf.get(f.parentFrameId) ?? childrenOf.set(f.parentFrameId, []).get(f.parentFrameId)!).push(f.id);
+      }
+      const doomed = new Set<string>([id]);
+      const stack = [id];
+      // BFS/DFS the subtree; the doomed-set guard also stops a parentFrameId cycle.
+      while (stack.length) {
+        const cur = stack.pop()!;
+        for (const child of childrenOf.get(cur) ?? []) {
+          if (doomed.has(child)) continue;
+          doomed.add(child);
+          stack.push(child);
+        }
+      }
+      return fs.filter((f) => !doomed.has(f.id));
+    });
   }, [setFrames]);
 
   // Opt-in "tidy": snap a frame's contents — its member tiles AND its worktree
@@ -137,8 +157,16 @@ export function useFrameOps(ctx: FrameOpsCtx) {
     const frameProvidesRepo = (tid: string): boolean => {
       const fid = frameOf[tid];
       if (!fid) return false;
-      const owner = framesRef.current.find((f) => f.id === fid);
-      return !!(owner?.worktreePath || owner?.workspacePath);
+      // Walk UP the parentFrameId chain: with N-level nesting the binding zone
+      // may be an ancestor of the tile's direct owner frame. Mirrors
+      // canvas-node-build's zoneFrameOf. Cycle-/depth-guarded.
+      let cur = framesRef.current.find((f) => f.id === fid);
+      for (let i = 0; i < 64 && cur; i++) {
+        if (cur.worktreePath || cur.workspacePath) return true;
+        const pid = cur.parentFrameId;
+        cur = pid ? framesRef.current.find((f) => f.id === pid) : undefined;
+      }
+      return false;
     };
     for (const t of tiles) {
       if ((t.kind === "editor" || t.kind === "diff") && !repoPath && !frameProvidesRepo(t.id)) continue;

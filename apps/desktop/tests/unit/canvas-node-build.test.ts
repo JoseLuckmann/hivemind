@@ -92,3 +92,74 @@ test("editor/diff tiles are skipped when there's no repo", () => {
   assert.equal(nodes.find((n) => n.id === "ed"), undefined, "editor skipped without a repo");
   assert.ok(nodes.find((n) => n.id === "sh"), "shell still rendered");
 });
+
+// ── N-level nesting (frames within frames) ──────────────────────────────────
+
+test("grandchild tile inherits the enclosing WORKSPACE zone via parent-chain walk-up", () => {
+  // ws (workspace zone) → group (plain sub-frame, no binding) → tile.
+  const frames = [
+    frame({ id: "ws", workspacePath: "/other/proj", workspaceRoot: "/other/proj/.hivemind" }),
+    frame({ id: "group", parentFrameId: "ws" }),
+  ];
+  const nodes = buildBaseNodes(ctx({
+    frames,
+    tiles: [tile({ id: "sh", kind: "shell" }), tile({ id: "iss", kind: "issues", label: "Issues" })],
+    frameOf: { sh: "group", iss: "group" },
+    positions: { sh: { x: 0, y: 0 }, iss: { x: 0, y: 0 } },
+  }));
+  // cwd/root come from the ANCESTOR zone, not the direct (unbound) group frame.
+  assert.equal((byId(nodes, "sh").data as Record<string, unknown>).cwd, "/other/proj");
+  assert.equal((byId(nodes, "iss").data as Record<string, unknown>).root, "/other/proj/.hivemind");
+});
+
+test("grandchild tile inherits the enclosing WORKTREE zone via walk-up (cwd = worktree)", () => {
+  // repo → wt (worktree) → group → tile. Terminal must run on the worktree path.
+  const frames = [
+    frame({ id: "repo" }),
+    frame({ id: "wt", worktreePath: "/wt/feature", branch: "feature", parentFrameId: "repo" }),
+    frame({ id: "group", parentFrameId: "wt" }),
+  ];
+  const nodes = buildBaseNodes(ctx({
+    frames,
+    tiles: [tile({ id: "sh", kind: "shell" })],
+    frameOf: { sh: "group" },
+    positions: { sh: { x: 0, y: 0 } },
+  }));
+  assert.equal((byId(nodes, "sh").data as Record<string, unknown>).cwd, "/wt/feature");
+});
+
+test("editor in a nested group under a worktree renders (repo resolved by walk-up)", () => {
+  // No global repo — the editor must still render because an ANCESTOR frame
+  // provides one. Regression guard for the render-gate walk-up.
+  const frames = [
+    frame({ id: "wt", worktreePath: "/wt/feature", branch: "feature" }),
+    frame({ id: "group", parentFrameId: "wt" }),
+  ];
+  const nodes = buildBaseNodes(ctx({
+    repoPath: null, root: null, cwd: "/tmp",
+    frames,
+    tiles: [tile({ id: "ed", kind: "editor", label: "Editor" })],
+    frameOf: { ed: "group" },
+    positions: { ed: { x: 0, y: 0 } },
+  }));
+  assert.ok(nodes.find((n) => n.id === "ed"), "editor renders via the ancestor worktree repo");
+  assert.equal((byId(nodes, "ed").data as Record<string, unknown>).repoPath, "/wt/feature");
+});
+
+test("3-level frames emit in depth order (grandparent → parent → grandchild)", () => {
+  const frames = [
+    frame({ id: "GC", x: 40, y: 40, parentFrameId: "P", z: 7 }),
+    frame({ id: "GP", x: 0, y: 0, z: 1 }),
+    frame({ id: "P", x: 20, y: 20, parentFrameId: "GP", z: 4 }),
+  ];
+  const nodes = buildBaseNodes(ctx({ frames }));
+  const order = nodes.filter((n) => n.type === "frame").map((n) => n.id);
+  // Each parent appears before its child (react-flow parentId requirement).
+  assert.ok(order.indexOf("GP") < order.indexOf("P"), "GP before P");
+  assert.ok(order.indexOf("P") < order.indexOf("GC"), "P before GC");
+  // zIndex increases with depth but stays below the tile tier (100).
+  const z = (id: string) => (byId(nodes, id).style as { zIndex: number }).zIndex;
+  assert.ok(z("GP") < z("P") && z("P") < z("GC") && z("GC") < 100, `${z("GP")} < ${z("P")} < ${z("GC")} < 100`);
+  // A grandchild's position is relative to its DIRECT parent.
+  assert.deepEqual(byId(nodes, "GC").position, { x: 20, y: 20 }, "GC rel to P (40-20,40-20)");
+});

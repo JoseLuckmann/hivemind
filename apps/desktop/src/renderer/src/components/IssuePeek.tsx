@@ -17,6 +17,8 @@ import {
   useUpdateIssue,
   useUpdateState,
   useWorkspaces,
+  useSyncConfig,
+  useSetRemoteState,
 } from "../queries";
 import { STATE_COLOR, STATE_LABEL, STATE_ORDER, StateIcon } from "./StateMeta";
 import { AssigneePicker, LabelPicker, ParentPicker } from "../issues/pickers";
@@ -40,6 +42,8 @@ export function IssuePeek({ root, id, onClose }: Props) {
   const patch = useUpdateIssue();
   const comment = useCommentOnIssue();
   const del = useDeleteIssue();
+  const { data: syncConfig } = useSyncConfig(root);
+  const setRemoteState = useSetRemoteState();
 
   // Workspace-wide issue list powers the editable pickers + sub-issue tree.
   const { data: allIssues = [] } = useIssues(root);
@@ -99,14 +103,17 @@ export function IssuePeek({ root, id, onClose }: Props) {
                     if (repoDir) {
                       try { await window.hive.installAgentic(repoDir); } catch { /* best-effort */ }
                     }
-                    const work = `Work on ${issue.id}: load it via hive_get_issue, complete the acceptance criteria, and end with hive_set_state. Title: "${issue.title}".`;
+                    const agent = issue.assignee?.type === "agent" ? issue.assignee.id : undefined;
+                    const model = issue.assignee?.type === "agent" ? issue.assignee.model : undefined;
                     window.dispatchEvent(
-                      new CustomEvent("hivemind:deliver-to-claude", { detail: { text: work } }),
+                      new CustomEvent("hivemind:work-on-issue", {
+                        detail: { root, id: issue.id, title: issue.title, agent, model },
+                      }),
                     );
                     onClose();
                   }}
                   className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[11.5px] font-semibold text-white bg-[var(--color-brand)] hover:opacity-90 cursor-pointer hm-soft"
-                  title="Set up agents (if needed), spawn claude, and tell it to work on this issue"
+                  title="Set up agents (if needed), spawn the task's agent in its workspace, and tell it to work on this issue"
                 >
                   <Play size={11} fill="currentColor" strokeWidth={0} aria-hidden />
                   Work on this
@@ -194,6 +201,21 @@ export function IssuePeek({ root, id, onClose }: Props) {
                     onChange={(s) => root && update.mutate({ root, id: issue.id, state: s, note: "set from peek" })}
                   />
                 </PropRow>
+                {syncConfig && root && (() => {
+                  const link = (issue.sync ?? []).find((s) => s.provider === syncConfig.providerId);
+                  const linked = !!link && link.externalId !== "__pending__";
+                  return (
+                    <PropRow label={`Remote board · ${syncConfig.providerId}`}>
+                      <RemoteStateRow
+                        linked={linked}
+                        remoteState={link?.remoteState}
+                        url={link?.url}
+                        pending={setRemoteState.isPending}
+                        onMove={(s) => setRemoteState.mutate({ root, id: issue.id, state: s })}
+                      />
+                    </PropRow>
+                  );
+                })()}
                 <PropRow label="Assignee">
                   <AssigneePicker
                     value={issue.assignee}
@@ -295,7 +317,68 @@ function StateSelect({ value, onChange }: { value: IssueState; onChange: (s: Iss
 }
 
 
-// ── editable widgets ──────────────────────────────────────────────────
+// The remote board (Azure) state + a mover. DELIBERATELY separate from the
+// local State picker: the local Kanban column is independent of the remote
+// board (a task can be locally "done" while it's "in review" upstream). Moving
+// here PATCHes only the remote item's state — it never touches local state.
+function RemoteStateRow({
+  linked,
+  remoteState,
+  url,
+  pending,
+  onMove,
+}: {
+  linked: boolean;
+  remoteState?: string;
+  url?: string;
+  pending: boolean;
+  onMove: (s: IssueState) => void;
+}) {
+  if (!linked) {
+    return (
+      <p className="text-[11px] text-[var(--color-fg2)]">
+        Not linked yet — sync this board to create/attach the remote item, then move it here.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5 text-[11.5px]">
+        <span className="text-[var(--color-fg3)]">now:</span>
+        <span className="font-medium text-[var(--color-fg)]">{remoteState || "unknown"}</span>
+        {url && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-auto text-[10.5px] text-[var(--color-info)] hover:underline"
+            title="Open the remote item"
+          >
+            open ↗
+          </a>
+        )}
+      </div>
+      <label className="sr-only" htmlFor="remote-state-move">Move remote board to</label>
+      <select
+        id="remote-state-move"
+        value=""
+        disabled={pending}
+        onChange={(e) => {
+          const v = e.target.value as IssueState | "";
+          if (v) onMove(v);
+          e.currentTarget.value = "";
+        }}
+        className="w-full bg-[var(--color-bg3)] border border-[var(--color-line2)] rounded-md px-2 py-1 text-[11.5px] text-[var(--color-fg)] focus:outline-none focus:border-[var(--color-brand)] cursor-pointer disabled:opacity-50"
+      >
+        <option value="">{pending ? "moving…" : "Move remote board to…"}</option>
+        {STATE_ORDER.map((s) => (
+          <option key={s} value={s}>{STATE_LABEL[s]}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 
 function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const [editing, setEditing] = useState(false);

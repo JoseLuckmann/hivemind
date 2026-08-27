@@ -317,23 +317,33 @@ function tileBox(f: FrameGeom, mem: MemberRect[] | undefined, k: FrameLayoutCons
 }
 
 /**
- * Whole-canvas frame geometry, nesting-aware.
+ * Whole-canvas frame geometry, nesting-aware — N levels deep.
  *
- * Two levels only (repo frame → worktree sub-frames). The algorithm:
+ * Frames form a forest (parentFrameId). A frame's geometry derives, bottom-up,
+ * from its own member tiles PLUS its (recursively laid-out) child frames. The
+ * algorithm, post-order (leaves first) so a parent can wrap already-sized
+ * children:
+ *
  *   1. Every frame's tile-derived box (`tileBox`).
- *   2. Separate each parent's CHILD frames among themselves (a sibling group),
- *      keeping the anchor fixed — children never overlap each other.
- *   3. Each parent's box = union(its own tiles, its children's separated
- *      boxes) inset by `nestPad` + header room, so children sit visually
- *      inside the parent below its title bar.
- *   4. Separate the TOP-LEVEL frames among themselves. A parent's delta
- *      cascades to its children (geometry + tile shift) so the nest moves as
- *      one body.
+ *   2. For each frame with children, lay the CHILD SUBTREES out first, then
+ *      separate that sibling group among themselves (anchor pinned) — siblings
+ *      never overlap. Record each child's LOCAL delta (within its parent).
+ *   3. The frame's desired box = union(own tiles, separated child boxes), inset
+ *      by `nestPad` + header room when it has children, so they sit visually
+ *      inside it below its title bar.
+ *   4. The ROOT sibling group (top-level frames) is separated last.
+ *   5. Deltas accumulate top-down: a frame's TOTAL shift = its parent's total
+ *      shift + its own local sibling delta. That total is what the caller
+ *      applies to the frame's member tiles, and it moves a whole nest as one
+ *      body at every depth.
  *
- * Returns final per-frame geometry plus, per frame, the {dx,dy} the caller
- * must apply to that frame's MEMBER TILES (absolute) so the next derive lands
- * the frame at the separated spot. For a child frame this shift already folds
- * in its parent's delta.
+ * At each sibling group the anchor is projected to the ANCESTOR that belongs to
+ * that group (see `groupAnchor`) — so dragging/spawning a deeply-nested frame
+ * pins its enclosing branch at every level and only outsiders yield.
+ *
+ * Returns final per-frame geometry plus, per frame, the {dx,dy} to apply to
+ * that frame's MEMBER TILES (absolute). For a nested frame this shift folds in
+ * every ancestor's delta.
  */
 export function computeFrameLayout(
   frames: FrameGeom[],
@@ -347,93 +357,138 @@ export function computeFrameLayout(
   const gap = k.gap ?? FRAME_GAP;
   const nestPad = k.nestPad ?? k.pad;
   const byId = new Map(frames.map((f) => [f.id, f]));
-  // A parentFrameId that points at a missing frame ⇒ treat as top-level.
+  // A parentFrameId that points at a missing frame ⇒ treat as top-level. Also
+  // guards a parentFrameId cycle: `depth`-cap the ancestor walk below.
   const parentOf = (f: FrameGeom) =>
     f.parentFrameId && byId.has(f.parentFrameId) ? f.parentFrameId : undefined;
 
   const childrenOf = new Map<string, FrameGeom[]>();
+  const roots: FrameGeom[] = [];
   for (const f of frames) {
     const p = parentOf(f);
     if (p) (childrenOf.get(p) ?? childrenOf.set(p, []).get(p)!).push(f);
+    else roots.push(f);
   }
 
   // 1) tile-derived box for every frame.
   const tBox = new Map<string, Rect>();
   for (const f of frames) tBox.set(f.id, tileBox(f, memberRects.get(f.id), k));
 
-  // The top-level pass must pin the anchor's PARENT (not the anchor itself) when
-  // the anchor is a worktree child — else spawning/dragging a child sets the
-  // anchor to the child id, which isn't in the top-level set, so the parent
-  // isn't pinned and the whole nest jumps when a sibling repo yields against it.
-  const anchorFrame = anchorId ? byId.get(anchorId) : undefined;
-  const topAnchor = anchorFrame ? (parentOf(anchorFrame) ?? anchorId) : anchorId;
-
-  // 2) separate sibling child frames within each parent.
-  const childDelta = new Map<string, { dx: number; dy: number }>();
-  for (const [, kids] of childrenOf) {
-    if (kids.length < 2) continue; // a lone child can't collide
-    const rects: LayoutRect[] = kids.map((c) => ({ id: c.id, ...tBox.get(c.id)! }));
-    const d = separateSiblingFrames(rects, anchorId, gap);
-    for (const c of kids) childDelta.set(c.id, d[c.id] ?? { dx: 0, dy: 0 });
+  // The set of ancestors of the anchor (anchor included). At each sibling group
+  // we pin whichever member is on this path — so a nest stays put at every
+  // level while outsiders yield. Cap the climb to guard a malformed cycle.
+  const anchorPath = new Set<string>();
+  if (anchorId && byId.has(anchorId)) {
+    let cur: string | undefined = anchorId;
+    for (let i = 0; i < 64 && cur; i++) {
+      anchorPath.add(cur);
+      cur = parentOf(byId.get(cur)!);
+    }
   }
-  const childBox = (id: string): Rect => {
-    const b = tBox.get(id)!;
-    const d = childDelta.get(id) ?? { dx: 0, dy: 0 };
-    return { x: b.x + d.dx, y: b.y + d.dy, w: b.w, h: b.h };
+  // Which member of THIS sibling group lies on the anchor path (if any).
+  const groupAnchor = (group: FrameGeom[]): string | null => {
+    for (const f of group) if (anchorPath.has(f.id)) return f.id;
+    return null;
   };
 
-  // 3) parent (top-level) desired box wraps own tiles + child boxes.
-  const topLevel = frames.filter((f) => !parentOf(f));
-  const rootDesired = new Map<string, Rect>();
-  for (const f of topLevel) {
-    const kids = childrenOf.get(f.id);
+  // `desired[id]` — a frame's box in its PARENT's (unshifted) coordinate space,
+  // i.e. after wrapping its already-separated children but before its own
+  // sibling-group separation. `localDelta[id]` — the shift its sibling-group
+  // separation applied (within the parent). Filled post-order.
+  const desired = new Map<string, Rect>();
+  const localDelta = new Map<string, { dx: number; dy: number }>();
+
+  // Post-order layout of the subtree rooted at `f`: lay out + separate its
+  // children first, then compute f's own desired box. Recursion depth = nesting
+  // depth (small); a visited-guard defends against a parentFrameId cycle.
+  const laidOut = new Set<string>();
+  const layout = (f: FrameGeom): void => {
+    if (laidOut.has(f.id)) return;
+    laidOut.add(f.id);
+    const kids = childrenOf.get(f.id) ?? [];
+    for (const c of kids) layout(c);
+
+    // Children whose desired box is known. A parentFrameId CYCLE creates a
+    // back-edge (a "child" that is actually an ancestor mid-layout); its box
+    // isn't computed yet, so exclude it here to avoid a use-before-set. The
+    // orphan pass lays such frames out as their own roots afterward.
+    const laidKids = kids.filter((c) => desired.has(c.id));
+
+    // Separate this frame's children among themselves (their desired boxes are
+    // now known). A lone child can't collide → zero delta.
+    if (laidKids.length >= 2) {
+      const rects: LayoutRect[] = laidKids.map((c) => ({ id: c.id, ...desired.get(c.id)! }));
+      const d = separateSiblingFrames(rects, groupAnchor(laidKids), gap);
+      for (const c of laidKids) localDelta.set(c.id, d[c.id] ?? { dx: 0, dy: 0 });
+    } else {
+      for (const c of laidKids) localDelta.set(c.id, { dx: 0, dy: 0 });
+    }
+
+    // f's desired box wraps its own tiles + its children's SEPARATED boxes.
     const boxes: Rect[] = [];
     const ownHasTiles = (memberRects.get(f.id)?.length ?? 0) > 0;
     if (ownHasTiles) boxes.push(tBox.get(f.id)!);
-    if (kids) for (const c of kids) boxes.push(childBox(c.id));
+    for (const c of laidKids) {
+      const b = desired.get(c.id)!;
+      const d = localDelta.get(c.id) ?? { dx: 0, dy: 0 };
+      boxes.push({ x: b.x + d.dx, y: b.y + d.dy, w: b.w, h: b.h });
+    }
     if (boxes.length === 0) {
-      // No tiles, no children → collapsed placeholder at current origin.
-      rootDesired.set(f.id, { x: f.x, y: f.y, w: k.emptyW, h: k.emptyH });
-      continue;
+      desired.set(f.id, { x: f.x, y: f.y, w: k.emptyW, h: k.emptyH });
+      return;
     }
     const minX = Math.min(...boxes.map((b) => b.x));
     const minY = Math.min(...boxes.map((b) => b.y));
     const maxR = Math.max(...boxes.map((b) => b.x + b.w));
     const maxB = Math.max(...boxes.map((b) => b.y + b.h));
-    if (kids?.length) {
-      // Inset around the nest + extra header room so the parent title bar
-      // clears the child frames sitting below it.
-      rootDesired.set(f.id, {
+    if (laidKids.length) {
+      // Inset around the nest + extra header room so the title bar clears the
+      // child frames sitting below it.
+      desired.set(f.id, {
         x: minX - nestPad,
         y: minY - k.header,
         w: maxR - minX + nestPad * 2,
         h: maxB - minY + k.header + nestPad,
       });
     } else {
-      rootDesired.set(f.id, { x: minX, y: minY, w: maxR - minX, h: maxB - minY });
+      desired.set(f.id, { x: minX, y: minY, w: maxR - minX, h: maxB - minY });
     }
+  };
+  for (const r of roots) layout(r);
+  // A parentFrameId CYCLE (A→B→A) leaves no roots, so nothing above laid those
+  // frames out. Treat any not-yet-laid-out frame as its own root so the call
+  // still terminates with geometry for every frame (malformed input, but we
+  // must never hang or drop frames).
+  const orphans = frames.filter((f) => !laidOut.has(f.id));
+  for (const f of orphans) layout(f);
+
+  // 4) separate the ROOT sibling group (pinning the anchor's top ancestor).
+  if (roots.length >= 2) {
+    const rects: LayoutRect[] = roots.map((f) => ({ id: f.id, ...desired.get(f.id)! }));
+    const d = resolveFrameCollisions(rects, groupAnchor(roots), gap);
+    for (const f of roots) localDelta.set(f.id, d[f.id] ?? { dx: 0, dy: 0 });
+  } else {
+    for (const f of roots) localDelta.set(f.id, { dx: 0, dy: 0 });
   }
 
-  // 4) separate the top-level frames (pinning the anchor's parent — see above).
-  const rootRects: LayoutRect[] = topLevel.map((f) => ({ id: f.id, ...rootDesired.get(f.id)! }));
-  const rootDelta = resolveFrameCollisions(rootRects, topAnchor, gap);
-
-  // 5) assemble final geometry + per-frame member-tile shift.
+  // 5) accumulate deltas top-down + assemble geometry. A frame's TOTAL shift is
+  // its parent's total plus its own local sibling delta; its final position is
+  // its (parent-space) desired box shifted by that total.
   const geometry = new Map<string, Rect>();
   const tileShift = new Map<string, { dx: number; dy: number }>();
-  for (const f of topLevel) {
-    const dp = rootDelta[f.id] ?? { dx: 0, dy: 0 };
-    const r = rootDesired.get(f.id)!;
-    geometry.set(f.id, { x: r.x + dp.dx, y: r.y + dp.dy, w: r.w, h: r.h });
-    tileShift.set(f.id, dp);
-    for (const c of childrenOf.get(f.id) ?? []) {
-      const dc = childDelta.get(c.id) ?? { dx: 0, dy: 0 };
-      const total = { dx: dp.dx + dc.dx, dy: dp.dy + dc.dy };
-      const cb = tBox.get(c.id)!;
-      geometry.set(c.id, { x: cb.x + total.dx, y: cb.y + total.dy, w: cb.w, h: cb.h });
-      tileShift.set(c.id, total);
-    }
-  }
+  const assemble = (f: FrameGeom, parentTotal: { dx: number; dy: number }): void => {
+    if (geometry.has(f.id)) return; // already placed (cycle / shared-guard)
+    const loc = localDelta.get(f.id) ?? { dx: 0, dy: 0 };
+    const total = { dx: parentTotal.dx + loc.dx, dy: parentTotal.dy + loc.dy };
+    const r = desired.get(f.id)!;
+    geometry.set(f.id, { x: r.x + total.dx, y: r.y + total.dy, w: r.w, h: r.h });
+    tileShift.set(f.id, total);
+    for (const c of childrenOf.get(f.id) ?? []) assemble(c, total);
+  };
+  for (const r of roots) assemble(r, { dx: 0, dy: 0 });
+  // Assemble cycle-orphan subtrees (see the orphan layout above). Guard against
+  // re-assembling a frame already placed via a root.
+  for (const f of orphans) if (!geometry.has(f.id)) assemble(f, { dx: 0, dy: 0 });
   return { geometry, tileShift };
 }
 

@@ -88,6 +88,23 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
   const y = 60;
   const gap = 24;
 
+  // ── nested-zone binding resolution ─────────────────────────────────────────
+  // A tile's effective repo/root comes from the NEAREST enclosing frame that
+  // carries a binding — walking UP the parentFrameId chain, not just the tile's
+  // direct owner frame. With N-level nesting a tile can sit in a plain grouping
+  // sub-frame whose parent (or grandparent) is the workspace/worktree zone; the
+  // tile must still inherit that zone's cwd/repo. Returns the owning ZONE frame
+  // (worktree or workspace) or null. Cycle-/depth-guarded.
+  const frameById = new Map(frames.map((f) => [f.id, f]));
+  const zoneFrameOf = (frameId: string | undefined): FrameState | null => {
+    let cur = frameId ? frameById.get(frameId) : undefined;
+    for (let i = 0; i < 64 && cur; i++) {
+      if (cur.worktreePath || cur.workspacePath) return cur;
+      cur = cur.parentFrameId ? frameById.get(cur.parentFrameId) : undefined;
+    }
+    return null;
+  };
+
   /** Build a node spec; parenting comes from the EXPLICIT frameOf map (not
    *  geometry). NO extent:'parent' — tiles move freely; membership changes only
    *  on drop (onNodeDragStop). */
@@ -117,7 +134,11 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
     };
     const parentFrame = frameOf[base.id] ? frames.find((f) => f.id === frameOf[base.id]) : undefined;
     if (parentFrame) {
-      const owner = parentFrame;
+      // Binding comes from the nearest enclosing ZONE (walk up the chain), while
+      // react-flow parenting below stays the DIRECT owner (DOM nesting). With
+      // N-level nesting the tile's owner may be a plain grouping sub-frame whose
+      // ancestor carries the worktree/workspace binding.
+      const owner = zoneFrameOf(parentFrame.id);
       // Zone repo for tiles inside this frame: a worktree (branch zone) wins,
       // else a bound workspace folder, else nothing (keep base repoPath/cwd/root).
       const zoneRepo = owner?.worktreePath ?? owner?.workspacePath;
@@ -158,20 +179,32 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
     return { width: Math.min(w, Math.max(640, vw - 80)), height: Math.min(h, Math.max(420, vh - 120)) };
   };
 
-  // Frames FIRST, PARENTS before their worktree CHILD frames (react-flow needs a
-  // parent node emitted before any node referencing it via parentId).
-  const frameById = new Map(frames.map((f) => [f.id, f]));
-  const orderedFrames = [
-    ...frames.filter((f) => !f.parentFrameId || !frameById.has(f.parentFrameId)),
-    ...frames.filter((f) => f.parentFrameId && frameById.has(f.parentFrameId)),
-  ];
+  // Frames FIRST, and every PARENT before its CHILD frames (react-flow needs a
+  // parent node emitted before any node referencing it via parentId). With
+  // N-level nesting this must be a full depth order, not a 2-way parent/child
+  // split. `frameById` is declared once above (used by zoneFrameOf).
+  const frameDepth = (f: FrameState): number => {
+    let d = 0;
+    let cur: FrameState | undefined = f;
+    for (let i = 0; i < 64 && cur; i++) {
+      const pid: string | undefined = cur.parentFrameId;
+      const parent: FrameState | undefined = pid ? frameById.get(pid) : undefined;
+      if (!parent) break;
+      d++;
+      cur = parent;
+    }
+    return d;
+  };
+  const orderedFrames = [...frames].sort((a, b) => frameDepth(a) - frameDepth(b));
   for (const f of orderedFrames) {
     const parent = f.parentFrameId ? frameById.get(f.parentFrameId) : undefined;
     // Child frame nests inside its parent: position RELATIVE to the parent.
-    // zIndex tiers: parent repo frame (≤40) < worktree child frame (50–90) <
-    // tiles (≥100) < selected (1000).
+    // zIndex by DEPTH so a deeper nest always sits above its enclosing frames
+    // but below tiles (≥100): root ≤40, each level adds a 50-wide band, capped
+    // so it never reaches the tile tier.
     const position = parent ? { x: f.x - parent.x, y: f.y - parent.y } : { x: f.x, y: f.y };
-    const zIndex = parent ? 50 + Math.min(f.z, 40) : Math.min(f.z, 40);
+    const depth = frameDepth(f);
+    const zIndex = depth === 0 ? Math.min(f.z, 40) : Math.min(40 + depth * 50 + Math.min(f.z, 40), 99);
     out.push({
       id: f.id,
       type: "frame",
@@ -186,7 +219,13 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
         worktreePath: f.worktreePath,
         head: f.head,
         parentFrameId: f.parentFrameId,
-        repoPath: f.workspacePath ?? repoPath ?? undefined,
+        // Effective repo for THIS frame's controls (attach-worktree picker,
+        // branch badge): its own worktree/workspace binding, else the nearest
+        // enclosing zone (walk up), else the canvas base repo. Without the
+        // walk-up, a worktree/group nested under a zone couldn't spawn deeper
+        // worktrees ("no git repo" in the picker).
+        repoPath: f.worktreePath ?? f.workspacePath ?? zoneFrameOf(f.parentFrameId)?.worktreePath
+          ?? zoneFrameOf(f.parentFrameId)?.workspacePath ?? repoPath ?? undefined,
         workspacePath: f.workspacePath,
         workspaceRoot: f.workspaceRoot,
         canBind: !!repoPath,
@@ -215,7 +254,7 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
   // inside such a frame — "editor won't open in the worktree". Use the effective
   // zone repo; mkTile applies the same override to the node's data.
   const tileRepo = (id: string): string | null => {
-    const owner = frameOf[id] ? frames.find((f) => f.id === frameOf[id]) : undefined;
+    const owner = zoneFrameOf(frameOf[id]);
     return owner?.worktreePath ?? owner?.workspacePath ?? repoPath ?? null;
   };
   for (const t of tiles) {

@@ -30,6 +30,7 @@ import {
   type IssueSections,
   type SyncLink,
   type IssueSummary,
+  PENDING_EXTERNAL_ID,
 } from "./types.js";
 
 const DIR = ".hivemind";
@@ -545,6 +546,10 @@ export interface CreateIssueOpts {
   github?: number | null;
   /** Actor recorded in the creation activity entry. Default "ui". */
   who?: string;
+  /** External-tracker hint: the provider + work item type + area/board this
+   *  issue should become on its first push. Stored as a "pending" sync link so
+   *  the sync engine creates the remote item on the chosen board/type. */
+  sync?: { provider: string; workItemType?: string; areaPath?: string };
 }
 
 /**
@@ -586,6 +591,20 @@ export async function createIssue(root: string, opts: CreateIssueOpts): Promise<
     },
     raw: SAMPLE_ISSUE_BODY,
   };
+  // Stash the chosen tracker board/type as a "pending" sync link, so the next
+  // sync creates the remote item on the right Area + work item type. Omit
+  // undefined-valued keys (the YAML dumper rejects `undefined`).
+  if (opts.sync?.provider) {
+    const link = Object.fromEntries(
+      Object.entries({
+        provider: opts.sync.provider,
+        externalId: PENDING_EXTERNAL_ID,
+        workItemType: opts.sync.workItemType,
+        areaPath: opts.sync.areaPath,
+      }).filter(([, v]) => v !== undefined),
+    ) as unknown as SyncLink;
+    issue.sync = [link];
+  }
   await writeIssue(issue);
   return issue;
 }
@@ -717,7 +736,14 @@ export async function setSyncLink(
   const issue = await readIssue(root, id);
   const rest = (issue.sync ?? []).filter((s) => s.provider !== link.provider);
   const isNew = rest.length === (issue.sync ?? []).length;
-  issue.sync = [...rest, link];
+  // Drop undefined-valued keys: the YAML serializer refuses to dump `undefined`
+  // ("unacceptable kind of an object"), and optional link fields (url,
+  // remoteRev, workItemType, areaPath, …) are legitimately absent for some
+  // providers/items. Storing them as missing keys keeps the frontmatter clean.
+  const clean = Object.fromEntries(
+    Object.entries(link).filter(([, v]) => v !== undefined),
+  ) as SyncLink;
+  issue.sync = [...rest, clean];
   appendActivity(
     issue,
     who,

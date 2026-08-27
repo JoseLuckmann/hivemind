@@ -249,6 +249,9 @@ export interface HiveIpc {
       assignee?: Issue["assignee"];
       description?: string;
       acceptanceCriteria?: AcceptanceItem[];
+      /** External-tracker hint: create the mirror on this board/type on the
+       *  next sync. Mirrors core's `CreateIssueOpts.sync`. */
+      sync?: { provider: string; workItemType?: string; areaPath?: string };
     }
   ): Promise<Issue>;
   updateIssue(root: string, id: string, patch: IssuePatch): Promise<Issue>;
@@ -281,6 +284,9 @@ export interface HiveIpc {
   clearSyncConfig(root: string): Promise<void>;
   /** Run a sync pass now, using the board's saved config + secret. */
   runSync(root: string): Promise<SyncReport>;
+  /** Explicitly move a linked issue's REMOTE board state (Azure column),
+   *  independent of the local Kanban state. */
+  setRemoteState(root: string, id: string, state: IssueState): Promise<void>;
 
   // ── cross-repo (registry + transfer + links) ───────────────
   /** Every registered workspace (other repos) whose root still exists. */

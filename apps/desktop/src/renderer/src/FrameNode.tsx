@@ -135,10 +135,14 @@ export function FrameNode({ id, data, selected }: { id: string; data: FrameNodeD
       });
     });
   }, [data.tileIds]);
-  // This frame IS a worktree sub-frame (nested in a repo frame) → show the
-  // worktree pill, no attach/workspace controls. A repo (base/workspace) frame
-  // instead offers "attach worktree" (spawns sub-frames) + "workspace".
-  const isWorktreeChild = !!data.parentFrameId;
+  // This frame IS a worktree sub-frame (bound to a git worktree) → show the
+  // branch pill + detach. Distinct from merely being NESTED: with N-level
+  // nesting a plain group/workspace frame can also have a parent, but it still
+  // offers the attach-worktree + workspace/remote binding controls so you can
+  // nest deeper. `isWorktree` gates the branch pill; nesting no longer hides
+  // the binding controls.
+  const isWorktree = !!data.worktreePath;
+  const isWorktreeChild = isWorktree; // back-compat alias; == "is a worktree"
   const wsBound = !!data.workspacePath;
   const wsName = data.workspacePath?.split("/").filter(Boolean).pop();
   const isRemoteWs = isRemote(data.workspacePath);
@@ -298,7 +302,7 @@ export function FrameNode({ id, data, selected }: { id: string; data: FrameNodeD
             </button>
           </span>
         ) : null}
-        {!isWorktreeChild && (
+        {data.repoPath && (
           <button
             ref={wtBtnRef}
             onClick={() => setShowWt((x) => !x)}

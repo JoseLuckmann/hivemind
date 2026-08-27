@@ -8,7 +8,7 @@
  * left out). Cards open the full IssuePeek; "work" spawns claude + delivers the
  * work prompt. Per-tile view + group-by persist in localStorage.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { GripVertical, Inbox, FolderGit2, Settings } from "lucide-react";
 import { HeaderPinButton, type PinRect } from "./canvas-nodes";
 import { useTileFont, FontStepper, handleFontKey } from "./tile-font";
@@ -83,6 +83,10 @@ interface Props {
 
 const viewKey = (root: string) => `hm:issues:view:${root}`;
 const groupKey = (root: string) => `hm:issues:group:${root}`;
+/** One-shot marker: we auto-seed the "my tasks" filter only the FIRST time a
+ *  board with a known current user opens, so clearing the filter afterwards
+ *  sticks instead of snapping back on the next render/mount. */
+const mineSeededKey = (root: string) => `hm:issues:mine-seeded:${root}`;
 const readLS = <T extends string>(k: string, fallback: T): T => {
   try {
     return (localStorage.getItem(k) as T) || fallback;
@@ -110,15 +114,48 @@ export function IssuesTile({ root, onClose, selected = false, pinned, onTogglePi
 
   const filtered = useMemo(() => applyFilters(issues, filters), [issues, filters]);
 
+  // The current user, per this board's sync config (Azure `assignedTo`). Used to
+  // default the board to "my tasks".
+  const currentUser = useMemo(() => {
+    const a = syncConfig?.settings?.assignedTo;
+    return typeof a === "string" && a ? a : null;
+  }, [syncConfig]);
+
+  // Default the board to the current user's tasks, ONCE per board. Only seeds
+  // when that user actually has issues here (so we don't hide everything on a
+  // board where the assignee ids don't match), and records a marker so a manual
+  // Clear afterwards is respected.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (!root || seededRef.current || !currentUser || issues.length === 0) return;
+    let already = false;
+    try { already = localStorage.getItem(mineSeededKey(root)) === "1"; } catch { /* ignore */ }
+    if (already) { seededRef.current = true; return; }
+    const mineCount = issues.filter((i) => i.assignee?.id === currentUser).length;
+    if (mineCount > 0) {
+      setFilters((f) => (f.assignees.size === 0 ? { ...f, assignees: new Set([currentUser]) } : f));
+    }
+    try { localStorage.setItem(mineSeededKey(root), "1"); } catch { /* ignore */ }
+    seededRef.current = true;
+  }, [root, currentUser, issues]);
+
   const workOn = async (issue: IssueSummary) => {
-    // Ensure the repo has the hive MCP + work skill (idempotent), then spawn claude
-    // with the work prompt attached (delivered once it's ready — see claude-bus).
+    // Ensure the repo has the hive MCP + work skill (idempotent), then hand the
+    // task off to Canvas, which spawns the RIGHT agent in the task's WORKSPACE
+    // and delivers a prompt carrying the task reference. The agent is the one
+    // assigned to the task (issue.assignee when it's an agent), else the canvas
+    // default. Canvas resolves the workspace frame from `root`.
     const repoDir = root ? root.replace(/\/\.hivemind\/?$/, "") : null;
     if (repoDir) {
       try { await window.hive.installAgentic(repoDir); } catch { /* best-effort */ }
     }
-    const work = `Work on ${issue.id}: load it via hive_get_issue, complete the acceptance criteria, and end with hive_set_state. Title: "${issue.title}".`;
-    window.dispatchEvent(new CustomEvent("hivemind:deliver-to-claude", { detail: { text: work } }));
+    const agent = issue.assignee?.type === "agent" ? issue.assignee.id : undefined;
+    const model = issue.assignee?.type === "agent" ? issue.assignee.model : undefined;
+    window.dispatchEvent(
+      new CustomEvent("hivemind:work-on-issue", {
+        detail: { root, id: issue.id, title: issue.title, agent, model },
+      }),
+    );
   };
 
   return (
@@ -200,7 +237,13 @@ export function IssuesTile({ root, onClose, selected = false, pinned, onTogglePi
               hint="No issues match the current filters."
             />
           ) : (
-            <div className="flex-1 overflow-auto p-2" style={{ zoom: font.size / 13 }}>
+            <div
+              // Board: only horizontal scroll here (columns own their own vertical
+              // scroll, so a tall backlog scrolls INSIDE its column instead of
+              // stretching the whole board). List: normal vertical scroll.
+              className={`flex-1 min-h-0 p-2 ${view === "board" ? "overflow-x-auto overflow-y-hidden" : "overflow-auto"}`}
+              style={{ zoom: font.size / 13 }}
+            >
               {view === "board" ? (
                 <BoardView
                   issues={filtered}

@@ -7,6 +7,45 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+### Added
+
+- **Issues board: aggregate "my tasks" across Azure boards + types.** The Azure DevOps sync now
+  pulls every configured work item type (Task, Bug, User Story, …) in one query and can scope the
+  pull to items assigned to you (your UPN/email), so one hivemind board can gather all your work
+  across the project's boards. The board defaults its filter to your tasks (once, per board), and
+  a new optional **Type** filter narrows by work item type. Assignee, work item type, and area
+  path are mapped from Azure onto each issue's sync link.
+- **New issue → choose Area (board) + Type.** When a board is synced, the New-issue modal shows a
+  Type picker (from the configured Azure types) and an Area (board) field. The choice is stamped on
+  the issue and honored the first time it's created upstream, so items land on the right board/type.
+- **Explicit remote board control, decoupled from local state.** The local Kanban column is now
+  independent of the Azure board — a task can be locally **Done** while it's still **In Review**
+  upstream. Routine sync no longer pushes/pulls state; the issue peek shows the remote board's
+  current state and a separate "Move remote board to…" control that PATCHes only the remote item.
+- **Work on this task → the right agent, in the right workspace.** "Work on this" now spawns the
+  agent assigned to the task (its registry agent, else the canvas default) inside the frame bound
+  to the task's workspace, and hands it the task reference (id + title) with instructions to load
+  it via `hive_get_issue` and treat later "do this" as scoped to that task.
+- **Frames within frames — N-level workspace nesting.** Worktrees and workspaces can now nest to
+  any depth (not just repo → worktree). Frame auto-fit is fully recursive (a grandchild frame is
+  contained by its parent, contained by its grandparent), tiles inherit the nearest enclosing
+  zone's repo/cwd by walking up the frame chain, dragging a frame into another nests it (with a
+  cycle guard), and deleting a frame removes its whole subtree.
+
+### Fixed
+
+- **Issues board no longer crams a tall column.** Board columns are now fixed-height with their own
+  vertical scroll, so a Backlog with dozens of issues scrolls inside its column instead of squishing
+  every card; the board scrolls horizontally across columns.
+- **Sync never auto-duplicates your board upstream.** A local-only issue is never auto-created in
+  Azure — creating a remote item is an explicit, opt-in action (the New-issue "file onto this board"
+  flow, or a deliberate push). Explicit creates also dedupe against an existing upstream item with
+  the same title, so a re-run after a partial failure adopts it instead of making a copy.
+- **Binding a child repo inside a hivemind parent folder now works.** When a parent folder was
+  itself `hive init`-ed (e.g. `~/Workspace` with a `.hivemind/`), binding a frame to a child repo
+  inside it (`~/Workspace/some-repo`) silently collapsed back onto the parent — the picked repo's
+  own git root now takes precedence over an ancestor's `.hivemind/`.
+
 ## [1.17.0-flow.1] — 2026-08-27
 
 ### Added

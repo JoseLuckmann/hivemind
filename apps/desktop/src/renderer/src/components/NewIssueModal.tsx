@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { useCreateIssue, useIssues, useWorkspaces } from "../queries";
+import { useCreateIssue, useIssues, useWorkspaces, useSyncConfig } from "../queries";
 import type { Assignee, IssueState } from "@hivemind/core/types";
 import { AssigneePicker, LabelPicker, ParentPicker } from "../issues/pickers";
 
@@ -88,6 +88,26 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
   const [assignee, setAssignee] = useState<Assignee | null>(null);
   const [parent, setParent] = useState<string | null>(null);
 
+  // Tracker (Azure) config for the selected workspace — powers the Area (board)
+  // + Type pickers so a new issue can be filed onto a specific board/type.
+  const { data: syncConfig } = useSyncConfig(selectedRoot);
+  const syncProviderId = syncConfig?.providerId ?? null;
+  const workItemTypes = useMemo<string[]>(() => {
+    const s = syncConfig?.settings;
+    if (Array.isArray(s?.workItemTypes)) return (s!.workItemTypes as unknown[]).filter((t): t is string => typeof t === "string");
+    if (typeof s?.workItemType === "string") return [s.workItemType];
+    return [];
+  }, [syncConfig]);
+  const defaultArea = typeof syncConfig?.settings?.areaPath === "string" ? syncConfig.settings.areaPath : "";
+  const [workItemType, setWorkItemType] = useState<string>("");
+  const [areaPath, setAreaPath] = useState<string>("");
+
+  // Re-seed the tracker fields whenever the target board / its config changes.
+  useEffect(() => {
+    setWorkItemType(workItemTypes[0] ?? "");
+    setAreaPath(defaultArea);
+  }, [workItemTypes, defaultArea, selectedRoot]);
+
   useEffect(() => {
     if (open) {
       setTitle("");
@@ -116,6 +136,15 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
           labels: labels.length ? labels : undefined,
           assignee: assignee ?? undefined,
           parent: parent ?? undefined,
+          // Only send a tracker hint when this board is synced — otherwise the
+          // issue is local-only and needs no provider/type/area.
+          sync: syncProviderId
+            ? {
+                provider: syncProviderId,
+                workItemType: workItemType.trim() || undefined,
+                areaPath: areaPath.trim() || undefined,
+              }
+            : undefined,
         },
       },
       {
@@ -186,6 +215,45 @@ export function NewIssueModal({ root, open, onOpenChange, onCreated }: Props) {
                 </PickerBox>
               </Field>
             </div>
+
+            {/* Tracker board + type — only when the workspace is synced to an
+                external tracker (Azure). Area = which board; Type = the Azure
+                work item type the item is created as. */}
+            {syncProviderId && (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Type">
+                  {workItemTypes.length > 0 ? (
+                    <select
+                      value={workItemType}
+                      onChange={(e) => setWorkItemType(e.target.value)}
+                      className={inputCls}
+                      aria-label="Work item type"
+                    >
+                      {workItemTypes.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={workItemType}
+                      onChange={(e) => setWorkItemType(e.target.value)}
+                      placeholder="Task"
+                      className={inputCls}
+                      aria-label="Work item type"
+                    />
+                  )}
+                </Field>
+                <Field label="Area (board)">
+                  <input
+                    value={areaPath}
+                    onChange={(e) => setAreaPath(e.target.value)}
+                    placeholder={defaultArea || "Project\\Team"}
+                    className={inputCls}
+                    aria-label="Area path"
+                  />
+                </Field>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Labels">

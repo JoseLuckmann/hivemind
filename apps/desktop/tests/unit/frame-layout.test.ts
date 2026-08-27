@@ -274,6 +274,81 @@ test("nested: 4 sibling children all stacked at one spot fan out into a row", ()
   kids.forEach((k, i) => assert.ok(contains(P, k), `parent must contain C${i + 1}`));
 });
 
+// ── N-level nesting (frames within frames, 3+ deep) ──────────────────────────
+
+test("3-level nest: grandparent contains parent contains grandchild", () => {
+  const frames: FrameGeom[] = [
+    { id: "GP", x: 0, y: 0, w: 460, h: 200 },
+    { id: "P", x: 0, y: 0, w: 460, h: 200, parentFrameId: "GP" },
+    { id: "GC", x: 0, y: 0, w: 460, h: 200, parentFrameId: "P" },
+  ];
+  // Only the deepest frame has tiles → geometry propagates leaf→root.
+  const members = new Map([["GC", [mem(300, 300, 700, 500)]]]);
+  const { geometry } = computeFrameLayout(frames, members, null, K);
+  const GP = geometry.get("GP")!, P = geometry.get("P")!, GC = geometry.get("GC")!;
+  assert.ok(contains(P, GC), `parent ${JSON.stringify(P)} must contain grandchild ${JSON.stringify(GC)}`);
+  assert.ok(contains(GP, P), `grandparent ${JSON.stringify(GP)} must contain parent ${JSON.stringify(P)}`);
+  assert.ok(GP.y < P.y && P.y < GC.y, "each level's title bar clears the one below");
+});
+
+test("3-level nest: a grandchild's tile shift folds in BOTH ancestor deltas", () => {
+  // Two 3-level nests whose wrapped roots overlap → the sibling root yields, and
+  // its grandchild must carry the FULL accumulated delta.
+  const frames: FrameGeom[] = [
+    { id: "GP1", x: 0, y: 0, w: 460, h: 200 },
+    { id: "P1", x: 0, y: 0, w: 460, h: 200, parentFrameId: "GP1" },
+    { id: "GC1", x: 0, y: 0, w: 460, h: 200, parentFrameId: "P1" },
+    { id: "GP2", x: 0, y: 0, w: 460, h: 200 },
+    { id: "P2", x: 0, y: 0, w: 460, h: 200, parentFrameId: "GP2" },
+    { id: "GC2", x: 0, y: 0, w: 460, h: 200, parentFrameId: "P2" },
+  ];
+  const members = new Map([
+    ["GC1", [mem(0, 0, 700, 500)]],
+    ["GC2", [mem(300, 0, 700, 500)]], // GP2's wrapped box overlaps GP1's
+  ]);
+  const { geometry, tileShift } = computeFrameLayout(frames, members, "GP1", K);
+  assert.equal(overlap(geometry.get("GP1")!, geometry.get("GP2")!), false, "root nests separated");
+  // GP1 anchored → GP2 (and its whole subtree) moves. GC2's shift == GP2's
+  // (P2 and GC2 are lone children at their level → zero local delta).
+  const dGP2 = tileShift.get("GP2")!;
+  assert.ok(dGP2.dx !== 0 || dGP2.dy !== 0, "GP2 actually moved");
+  assert.deepEqual(tileShift.get("GC2"), dGP2, "grandchild carries the accumulated ancestor delta");
+  assert.ok(contains(geometry.get("GP2")!, geometry.get("GC2")!), "GP2 still contains GC2 after the move");
+});
+
+test("N-level: anchoring on a deep grandchild pins its whole ancestor chain", () => {
+  const frames: FrameGeom[] = [
+    { id: "GP1", x: 0, y: 0, w: 460, h: 200 },
+    { id: "P1", x: 0, y: 0, w: 460, h: 200, parentFrameId: "GP1" },
+    { id: "GC1", x: 0, y: 0, w: 460, h: 200, parentFrameId: "P1" },
+    { id: "GP2", x: 0, y: 0, w: 460, h: 200 },
+    { id: "GC2b", x: 0, y: 0, w: 460, h: 200, parentFrameId: "GP2" },
+  ];
+  const members = new Map([
+    ["GC1", [mem(0, 0, 700, 500)]],
+    ["GC2b", [mem(300, 0, 700, 500)]],
+  ]);
+  const { tileShift } = computeFrameLayout(frames, members, "GC1", K);
+  // The anchor's entire chain (GC1→P1→GP1) is pinned; the outsider yields.
+  assert.deepEqual(tileShift.get("GP1"), { dx: 0, dy: 0 }, "grandparent pinned");
+  assert.deepEqual(tileShift.get("GC1"), { dx: 0, dy: 0 }, "anchored grandchild pinned");
+  const dGP2 = tileShift.get("GP2")!;
+  assert.ok(dGP2.dx !== 0 || dGP2.dy !== 0, "the sibling nest yields");
+});
+
+test("N-level: a parentFrameId cycle is tolerated (no infinite loop, produces geometry)", () => {
+  // Malformed input: A→B→A. The depth/ancestor walks are cycle-guarded.
+  const frames: FrameGeom[] = [
+    { id: "A", x: 0, y: 0, w: 460, h: 200, parentFrameId: "B" },
+    { id: "B", x: 0, y: 0, w: 460, h: 200, parentFrameId: "A" },
+  ];
+  const members = new Map([["A", [mem(0, 0, 500, 400)]]]);
+  const { geometry } = computeFrameLayout(frames, members, "A", K);
+  // Both frames get SOME geometry and the call returns (the real assertion is
+  // that it terminates).
+  assert.ok(geometry.has("A") && geometry.has("B"));
+});
+
 // ── arrangeBoxes (opt-in tidy) ───────────────────────────────────────────────
 const box = (id: string, x: number, y: number, w: number, h: number): ArrangeBox => ({ id, x, y, w, h });
 const ARR = { originX: 100, originY: 200, padX: 24, padTop: 48, gap: 24, maxRowWidth: 1000 };

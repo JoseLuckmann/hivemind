@@ -74,10 +74,31 @@ export const SyncLinkZ = z.object({
    *  landed in the same millisecond". A content hash has neither problem,
    *  and also ignores edits to fields sync doesn't touch (assignee, parent). */
   localFieldsHash: z.string().optional(),
+  /** Provider-specific work item type this item is (Azure "Task"/"Bug"/...).
+   *  Captured on pull/create so a later push (incl. a board state move) targets
+   *  the type the item actually is — its board pattern — instead of the board's
+   *  default type. Read as `link.workItemType`. */
+  workItemType: z.string().optional(),
+  /** Provider-specific area/board path (Azure `System.AreaPath`). Which board
+   *  the item belongs to; carried so aggregated cross-board views and state
+   *  moves respect the item's own board. */
+  areaPath: z.string().optional(),
+  /** The remote board's CURRENT state name (Azure `System.State`), as of the
+   *  last sync. Display-only: the local Kanban `state` is decoupled from this
+   *  (a task can be locally "done" while the remote is "in review"). The user
+   *  moves the remote board explicitly; this shows where it currently sits. */
+  remoteState: z.string().optional(),
   /** When this link was last successfully synced. */
   syncedAt: IsoZ.optional(),
 });
 export type SyncLink = z.infer<typeof SyncLinkZ>;
+
+/** Sentinel `externalId` for a sync link that only stashes a desired work item
+ *  type + area for an issue not yet pushed to the tracker (created via the UI
+ *  with an explicit Area/Type). The sync engine treats such a link as "push as
+ *  new, honoring this hint". Lives here (node-free) so both storage.ts and the
+ *  sync engine can reference it without an import cycle. */
+export const PENDING_EXTERNAL_ID = "__pending__";
 
 /** YAML frontmatter schema for an issue file. */
 export const IssueFrontmatterZ = z.object({
