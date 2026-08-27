@@ -16,7 +16,7 @@ const api: HiveIpc & {
   ) => () => void;
   onFsChanged: (
     repoPath: string,
-    cb: (info: { paths: string[] }) => void
+    cb: (info: { paths: string[]; events?: { path: string; type: "added" | "modified" | "removed" }[] }) => void
   ) => () => void;
   onMenuNewIssue: (cb: () => void) => () => void;
   onMenuToggleLayers: (cb: () => void) => () => void;
@@ -39,6 +39,8 @@ const api: HiveIpc & {
 } = {
   resolveProject: (rootHint) => ipcRenderer.invoke("resolveProject", rootHint),
   pickProjectFolder: () => ipcRenderer.invoke("pickProjectFolder"),
+  pickFolder: (opts) => ipcRenderer.invoke("pickFolder", opts),
+  watchPath: (path) => ipcRenderer.invoke("watchPath", path),
   initWorkspace: (dir, prefix) => ipcRenderer.invoke("initWorkspace", dir, prefix),
   installAgentic: (dir) => ipcRenderer.invoke("installAgentic", dir),
   listIssues: (root) => ipcRenderer.invoke("listIssues", root),
@@ -148,7 +150,10 @@ const api: HiveIpc & {
   },
   onFsChanged: (repoPath, cb) => {
     const ch = `fs:changed:${repoPath}`;
-    const listener = (_e: unknown, info: { paths: string[] }) => cb(info);
+    const listener = (
+      _e: unknown,
+      info: { paths: string[]; events?: { path: string; type: "added" | "modified" | "removed" }[] },
+    ) => cb(info);
     ipcRenderer.on(ch, listener);
     return () => ipcRenderer.removeListener(ch, listener);
   },

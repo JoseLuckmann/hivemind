@@ -7,6 +7,25 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+### Added
+
+- **File Explorer tile.** A new standalone canvas tile (Open ▸ Explorer) for browsing any
+  folder — not just a frame's bound repo — with a live-updating OS-style icon grid on the
+  right and a folder tree on the left. "Change folder…" points it anywhere; new/changed/
+  removed files show up without a manual refresh (a dedicated `watchPath` watcher guarantees
+  the bound folder is live, even for a worktree/workspace zone the app wouldn't otherwise
+  watch). Double-click a file to open it with the OS default app; editing stays in the Editor
+  tile. Publishes file-count/last-event metadata via a new `explorer-status-bus` so other
+  canvas surfaces can consume an Explorer tile's live state.
+- The **File…** picker (a frame's Open menu) is now a real navigable folder tree (reusing the
+  Editor tile's file tree) instead of a flat search-only list.
+
+### Fixed
+
+- The frame header's "+ → Open in zone" menu and the Layers rail's "Open ▸" submenu each had
+  their `Terminal/Editor/Diff/Issues/Browser` entries listed twice (a leftover from an earlier
+  incomplete edit); both now render once, from the shared `OPEN_KINDS` list.
+
 ## [1.16.0-flow.1] — 2026-08-26
 
 ### Added

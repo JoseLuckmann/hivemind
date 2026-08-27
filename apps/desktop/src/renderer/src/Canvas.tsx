@@ -175,6 +175,12 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
       return { ...m, [id]: trimmed };
     });
   }, []);
+  // explorer only — repoint a File Explorer tile at a different absolute
+  // folder (its "Change folder…" button). Persists on the TileInstance like
+  // any other per-tile field, so the tile reopens on the same folder.
+  const onSetFolder = useCallback((id: string, folder: string) => {
+    setTiles((cur) => cur.map((t) => (t.id === id ? { ...t, folder } : t)));
+  }, [setTiles]);
   // Live agent session titles from the terminal OSC window-title (claude writes
   // a task summary there). NOT persisted here — the DAEMON owns the title as
   // session state (persisted in its snapshot) and re-emits it ahead of the
@@ -1160,11 +1166,11 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     tileNames, agentTitles, frameTiles, framesChipNames,
     updateFrameTitle, updateFrameColor, deleteFrame, arrangeFrame, bringFrameToFront,
     onAttachWorktree, onCreateWorktree, unbindBranch, bindWorkspace, unbindWorkspace,
-    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onNodeResizeCommit, renameTile, setAgentTitle,
+    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, onNodeResizeCommit, renameTile, setAgentTitle,
     onTogglePin: togglePin, onPinChange,
   }), [
     repoPath, root, cwd, tiles, editorTabs, browserOpenReqs, frames, frameOf, pinnedIds, sizes, positions,
-    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, updateFrameTitle, updateFrameColor,
+    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, updateFrameTitle, updateFrameColor,
     deleteFrame, arrangeFrame, bringFrameToFront, onAttachWorktree, onCreateWorktree,
     unbindBranch, onNodeResizeCommit, frameTiles, tileNames, bindWorkspace,
     // agentTitles intentionally NOT a dep: a live title change must not rebuild

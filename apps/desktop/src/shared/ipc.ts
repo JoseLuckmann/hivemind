@@ -200,6 +200,19 @@ export interface HiveIpc {
    *  resolveProject(picked) to repoint the canvas + sidebar at the chosen
    *  workspace without restarting the app. */
   pickProjectFolder(): Promise<string | null>;
+  /** Show a native folder picker for an arbitrary purpose (e.g. the File
+   *  Explorer tile's "change folder"). Same dialog as pickProjectFolder,
+   *  just not tied to "open a project" semantics — a neutral title + an
+   *  optional starting directory. Returns the picked path, or null if the
+   *  user cancelled. */
+  pickFolder(opts?: { title?: string; defaultPath?: string }): Promise<string | null>;
+  /** Start (or confirm) a chokidar watcher on an arbitrary path — emits
+   *  `fs:changed:<path>` (subscribe via onFsChanged) on add/change/unlink.
+   *  Idempotent: safe to call repeatedly for the same path. Used by the File
+   *  Explorer tile so a folder outside the app's main resolved repo (e.g. a
+   *  worktree, or any folder an agent writes into) is guaranteed to be live,
+   *  not just the single repo `resolveProject` auto-watches. */
+  watchPath(path: string): Promise<void>;
   /** Create a .hivemind/ workspace in `dir` with the given issue prefix.
    *  Returns the new root path. Renderer should re-resolve afterwards. */
   initWorkspace(dir: string, prefix: string): Promise<{ root: string }>;

@@ -7,11 +7,22 @@ import chokidar, { type FSWatcher } from "chokidar";
 import path from "node:path";
 import type { WebContents } from "electron";
 
+type RawEventType = "add" | "change" | "unlink";
+const EVENT_TYPE: Record<RawEventType, "added" | "modified" | "removed"> = {
+  add: "added",
+  change: "modified",
+  unlink: "removed",
+};
+
 interface Active {
   watcher: FSWatcher;
   webContents: Set<WebContents>;
   flush: NodeJS.Timeout | null;
-  pending: Set<string>;
+  // Last event type per path within the current coalescing window — a Map
+  // (not a Set) so consumers that care about WHAT happened (added a new file
+  // vs. it was deleted), not just THAT something changed, can react — e.g. the
+  // File Explorer tile's file-count/last-event metadata.
+  pending: Map<string, RawEventType>;
 }
 
 const active = new Map<string, Active>();
@@ -75,23 +86,27 @@ export function watchRepo(repoPath: string, wc: WebContents): void {
     watcher,
     webContents: new Set([wc]),
     flush: null,
-    pending: new Set(),
+    pending: new Map(),
   };
   active.set(repoPath, entry);
 
-  const trigger = (p: string) => {
-    entry!.pending.add(p);
+  const trigger = (type: RawEventType) => (p: string) => {
+    entry!.pending.set(p, type);
     if (entry!.flush) clearTimeout(entry!.flush);
     entry!.flush = setTimeout(() => {
-      const paths = Array.from(entry!.pending);
+      const events = Array.from(entry!.pending.entries()).map(([path, t]) => ({
+        path,
+        type: EVENT_TYPE[t],
+      }));
+      const paths = events.map((e) => e.path);
       entry!.pending.clear();
       entry!.flush = null;
       for (const w of entry!.webContents) {
-        if (!w.isDestroyed()) w.send(`fs:changed:${repoPath}`, { paths });
+        if (!w.isDestroyed()) w.send(`fs:changed:${repoPath}`, { paths, events });
       }
     }, 300);
   };
-  watcher.on("add", trigger).on("change", trigger).on("unlink", trigger);
+  watcher.on("add", trigger("add")).on("change", trigger("change")).on("unlink", trigger("unlink"));
 }
 
 export function unwatch(repoPath: string, wc: WebContents): void {
