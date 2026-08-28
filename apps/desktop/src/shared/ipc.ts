@@ -329,6 +329,16 @@ export interface HiveIpc {
   }): Promise<{ removed: boolean }>;
   /** What's summoned (global) vs local (repo-authored) in a workspace. */
   catalogSummonList(workspaceRoot: string): Promise<CatalogSummonView>;
+  /** Associate skills/mcps with an agent (writes the agent's manifest). */
+  catalogSetAssociations(name: string, assoc: { skills?: string[]; mcps?: string[] }): Promise<CatalogResource>;
+  /** Summon an agent + its associated skills/mcps into a workspace in one shot. */
+  catalogSummonBundle(opts: {
+    agentName: string;
+    workspaceRoot: string;
+    cli?: CatalogCli;
+    scope?: "project" | "global";
+    copy?: boolean;
+  }): Promise<CatalogSummonResult[]>;
 
   // ── external-tracker sync (Azure DevOps, ...) ───────────────
   /** This board's sync config, or null if it isn't linked to a tracker.

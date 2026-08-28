@@ -17,6 +17,8 @@ import {
   unsummon,
   summonList,
   GLOBAL_LEDGER_KEY,
+  setAgentAssociations,
+  summonAgentBundle,
 } from "./catalog.js";
 
 // Each test gets an isolated XDG_CONFIG_HOME (so catalogRoot() points into a
@@ -413,5 +415,49 @@ describe("summon --copy (file copy instead of symlink)", () => {
     const r = await createResource({ kind: "agent", name: "reviewer" });
     const res = await summon({ resource: r, workspaceRoot: repo, cli: "claude", copy: false });
     expect(res.mode).toBe("symlink"); // local default stays symlink
+  });
+});
+
+describe("agent associations + bundle", () => {
+  test("setAgentAssociations writes skills/mcps to the agent manifest", async () => {
+    await createResource({ kind: "agent", name: "reviewer" });
+    await createResource({ kind: "skill", name: "hive-work" });
+    await createResource({ kind: "mcp", name: "postgres", mcpServer: { command: "pg" } });
+    const updated = await setAgentAssociations("reviewer", { skills: ["hive-work"], mcps: ["postgres"] });
+    expect(updated.skills).toEqual(["hive-work"]);
+    expect(updated.mcps).toEqual(["postgres"]);
+    // persisted: re-read from disk
+    const reread = await getResource("agent", "reviewer");
+    expect(reread.skills).toEqual(["hive-work"]);
+    expect(reread.mcps).toEqual(["postgres"]);
+  });
+
+  test("summonAgentBundle projects the agent + its associated skills + mcps", async () => {
+    const agent = await createResource({ kind: "agent", name: "reviewer" });
+    await createResource({ kind: "skill", name: "hive-work" });
+    await createResource({ kind: "mcp", name: "postgres", mcpServer: { command: "pg" } });
+    await setAgentAssociations("reviewer", { skills: ["hive-work"], mcps: ["postgres"] });
+    const withAssoc = await getResource("agent", "reviewer");
+
+    const results = await summonAgentBundle({ agent: withAssoc, workspaceRoot: repo, cli: "claude" });
+    // agent + skill + mcp = 3 projections
+    expect(results).toHaveLength(3);
+    expect((await fs.lstat(path.join(repo, ".claude", "agents", "reviewer.md"))).isSymbolicLink()).toBe(true);
+    expect((await fs.lstat(path.join(repo, ".claude", "skills", "hive-work"))).isSymbolicLink()).toBe(true);
+    const doc = JSON.parse(await fs.readFile(path.join(repo, ".mcp.json"), "utf8"));
+    expect(doc.mcpServers.postgres).toEqual({ command: "pg" });
+    // ledger has all three
+    expect(await ledgerFor(repo)).toHaveLength(3);
+    // agent used for the initial summon (bundle ignores its own return here)
+    expect(agent.kind).toBe("agent");
+  });
+
+  test("summonAgentBundle skips a deleted associated skill gracefully", async () => {
+    await createResource({ kind: "agent", name: "reviewer" });
+    await setAgentAssociations("reviewer", { skills: ["ghost-skill"] });
+    const withAssoc = await getResource("agent", "reviewer");
+    const results = await summonAgentBundle({ agent: withAssoc, workspaceRoot: repo, cli: "claude" });
+    // only the agent projected; the missing skill is skipped
+    expect(results).toHaveLength(1);
   });
 });

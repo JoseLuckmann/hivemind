@@ -337,33 +337,6 @@ export function buildBaseNodes(ctx: NodeBuildCtx): Node[] {
         data: { root, onResize: onNodeResizeCommit, onClose: () => closeTile(t.id) },
         dragHandle: ".tile-drag-handle",
       };
-    } else if (t.kind === "catalog") {
-      // Summon targets = every frame bound to a repo/worktree (so you can send a
-      // resource into any workspace on the canvas, not just this tile's frame).
-      const targets = frames
-        .map((f) => {
-          const zone = f.worktreePath || f.workspacePath ? f : zoneFrameOf(f.id);
-          const repo = zone?.worktreePath ?? zone?.workspacePath;
-          return repo ? { id: f.id, label: f.title || "frame", repoPath: repo } : null;
-        })
-        .filter((x): x is { id: string; label: string; repoPath: string } => !!x);
-      // De-dup by repoPath (nested sub-frames resolve to the same zone).
-      const seenRepo = new Set<string>();
-      const uniqueTargets = targets.filter((t2) =>
-        seenRepo.has(t2.repoPath) ? false : (seenRepo.add(t2.repoPath), true),
-      );
-      node = {
-        id: t.id,
-        type: "catalog",
-        style: sized(t.id, w, h),
-        data: {
-          repoPath: effRepo,
-          targets: uniqueTargets,
-          onResize: onNodeResizeCommit,
-          onClose: () => closeTile(t.id),
-        },
-        dragHandle: ".tile-drag-handle",
-      };
     } else if (t.kind === "browser") {
       // No repo needed — a browser tile is repo-agnostic.
       node = {

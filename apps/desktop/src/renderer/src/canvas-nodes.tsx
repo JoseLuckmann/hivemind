@@ -24,7 +24,6 @@ import { clampAnchor } from "./pin-anchor";
 import { TerminalTile } from "./TerminalTile";
 import { BrowserTile } from "./BrowserTile";
 import { IssuesTile } from "./IssuesTile";
-import { CatalogTile, type SummonTarget } from "./CatalogTile";
 import { PlanReviewTile } from "./PlanReviewTile";
 import { FileTile } from "./FileTile";
 import { FrameNode, type FrameNodeData } from "./FrameNode";
@@ -719,20 +718,6 @@ export function TileBody({
       return (
         <TileErrorBoundary label="Plan review" onClose={data.onClose as (() => void) | undefined}>
           <PlanReviewTile {...(data as unknown as PlanReviewNodeData)} />
-        </TileErrorBoundary>
-      );
-    case "catalog":
-      return (
-        <TileErrorBoundary label="Catalog" onClose={data.onClose as (() => void) | undefined}>
-          <CatalogTile
-            repoPath={data.repoPath as string | null}
-            targets={data.targets as SummonTarget[] | undefined}
-            onEdit={data.onEdit as ((path: string) => void) | undefined}
-            onClose={data.onClose as () => void}
-            selected={selected}
-            pinned={data.pinned as boolean | undefined}
-            onTogglePin={data.onTogglePin as never}
-          />
         </TileErrorBoundary>
       );
     default:

@@ -31,6 +31,8 @@ import {
   summon as catalogSummonCore,
   unsummon as catalogUnsummonCore,
   summonList as catalogSummonListCore,
+  setAgentAssociations as catalogSetAssociationsCore,
+  summonAgentBundle as catalogSummonBundleCore,
   type IssueState,
   type LinkType,
 } from "@hivemind/core";
@@ -936,6 +938,19 @@ ipcMain.handle(
 ipcMain.handle(
   "catalogSummonList",
   wrap(async (_e, workspaceRoot: string) => catalogSummonListCore(workspaceRoot)),
+);
+ipcMain.handle(
+  "catalogSetAssociations",
+  wrap(async (_e, name: string, assoc: { skills?: string[]; mcps?: string[] }) =>
+    catalogSetAssociationsCore(name, assoc),
+  ),
+);
+ipcMain.handle(
+  "catalogSummonBundle",
+  wrap(async (_e, opts: { agentName: string; workspaceRoot: string; cli?: CatalogCli; scope?: "project" | "global"; copy?: boolean }) => {
+    const agent = await catalogGetResource("agent", opts.agentName);
+    return catalogSummonBundleCore({ agent, workspaceRoot: opts.workspaceRoot, cli: opts.cli, scope: opts.scope, copy: opts.copy });
+  }),
 );
 
 // ── cross-repo: registry + transfer + links ─────────────────────────────

@@ -696,3 +696,34 @@ export function useUnsummon() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["catalog-summons"] }),
   });
 }
+
+/** Associate skills/mcps with an agent (writes the agent's manifest). */
+export function useSetAssociations() {
+  const qc = useQueryClient();
+  return useMutation<
+    CatalogResource,
+    Error,
+    { name: string; skills?: string[]; mcps?: string[] }
+  >({
+    mutationFn: ({ name, skills, mcps }) => window.hive.catalogSetAssociations(name, { skills, mcps }),
+    onError: (e) => toast.error("update associations failed", { description: e.message }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["catalog"] }),
+  });
+}
+
+/** Summon an agent + its associated skills/mcps into a workspace in one shot. */
+export function useSummonBundle() {
+  const qc = useQueryClient();
+  return useMutation<
+    Awaited<ReturnType<typeof window.hive.catalogSummonBundle>>,
+    Error,
+    { agentName: string; workspaceRoot: string; cli?: CatalogCli; scope?: "project" | "global"; copy?: boolean }
+  >({
+    mutationFn: (opts) => window.hive.catalogSummonBundle(opts),
+    onError: (e) => toast.error("summon bundle failed", { description: e.message }),
+    onSuccess: (res) => {
+      toast.success(`summoned ${res.length} resource(s) → ${res[0]?.cli ?? "claude"}`);
+      qc.invalidateQueries({ queryKey: ["catalog-summons"] });
+    },
+  });
+}

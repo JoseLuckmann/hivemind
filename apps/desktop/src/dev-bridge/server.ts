@@ -59,6 +59,8 @@ import {
   summon as catalogSummonCore,
   unsummon as catalogUnsummonCore,
   summonList as catalogSummonListCore,
+  setAgentAssociations as catalogSetAssociationsCore,
+  summonAgentBundle as catalogSummonBundleCore,
   type ResourceKind as CatalogResourceKind,
   type Cli as CatalogCli,
 } from "@hivemind/core";
@@ -229,6 +231,8 @@ const PREVIEW_SCRIPT = `
     catalogSummon:        (o) => call("catalogSummon", o),
     catalogUnsummon:      (o) => call("catalogUnsummon", o),
     catalogSummonList:    (r) => call("catalogSummonList", r),
+    catalogSetAssociations: (n,a) => call("catalogSetAssociations", n, a),
+    catalogSummonBundle:  (o) => call("catalogSummonBundle", o),
     gitStatus:         (r) => call("gitStatus", r),
     gitListFiles:      (r) => call("gitListFiles", r),
     gitDiff:           (r,s,f) => call("gitDiff", r, s, f),
@@ -323,6 +327,12 @@ const RPC: Record<string, (...args: unknown[]) => Promise<unknown> | unknown> = 
     return { removed };
   },
   catalogSummonList: (workspaceRoot: string) => catalogSummonListCore(workspaceRoot),
+  catalogSetAssociations: (name: string, assoc: { skills?: string[]; mcps?: string[] }) =>
+    catalogSetAssociationsCore(name, assoc),
+  catalogSummonBundle: async (opts: { agentName: string; workspaceRoot: string; cli?: CatalogCli; scope?: "project" | "global"; copy?: boolean }) => {
+    const agent = await catalogGetResource("agent", opts.agentName);
+    return catalogSummonBundleCore({ agent, workspaceRoot: opts.workspaceRoot, cli: opts.cli, scope: opts.scope, copy: opts.copy });
+  },
   gitStatus: (r: string) => gitStatus(r),
   gitListFiles: (r: string) => gitListFiles(r),
   gitDiff: (r: string, s: Parameters<typeof gitDiff>[1], f?: string) => gitDiff(r, s, f),

@@ -73,6 +73,11 @@ export const ResourceManifestZ = z.object({
   clis: z.array(CliZ).default([]),
   /** For kind=mcp: the server fragment merged into the target mcpServers map. */
   mcpServer: McpServerZ.optional(),
+  /** For kind=agent: names of catalog skills associated with this agent, so
+   *  summoning/spawning the agent also brings its skills. */
+  skills: z.array(z.string()).default([]),
+  /** For kind=agent: names of catalog mcps associated with this agent. */
+  mcps: z.array(z.string()).default([]),
 });
 export type ResourceManifest = z.infer<typeof ResourceManifestZ>;
 
@@ -89,6 +94,9 @@ export interface Resource {
    *  null for mcp resources (which have no standalone file). */
   canonicalFile: string | null;
   mcpServer?: Record<string, unknown>;
+  /** agent-only: associated catalog skill/mcp names. */
+  skills: string[];
+  mcps: string[];
 }
 
 // ── ledger schema ──────────────────────────────────────────────────────────
@@ -179,7 +187,31 @@ export async function getResource(kind: ResourceKind, name: string): Promise<Res
     dir,
     canonicalFile: fileName ? path.join(dir, fileName) : null,
     mcpServer: manifest.mcpServer,
+    skills: manifest.skills,
+    mcps: manifest.mcps,
   };
+}
+
+/** Update an agent's associated skills/mcps in its manifest. Only meaningful
+ *  for kind=agent. Idempotent; rewrites resource.yaml preserving other fields. */
+export async function setAgentAssociations(
+  name: string,
+  assoc: { skills?: string[]; mcps?: string[] },
+): Promise<Resource> {
+  const dir = resourceDir("agent", name);
+  let manifest: ResourceManifest;
+  try {
+    manifest = await readManifest(dir);
+  } catch {
+    throw new HiveError("not_found", `agent ${name} not found in catalog`);
+  }
+  const next: ResourceManifest = {
+    ...manifest,
+    skills: assoc.skills ?? manifest.skills,
+    mcps: assoc.mcps ?? manifest.mcps,
+  };
+  await writeFileAtomic(path.join(dir, "resource.yaml"), YAML.stringify(ResourceManifestZ.parse(next)));
+  return getResource("agent", name);
 }
 
 /** Resolve a resource by name alone, searching all kinds. Errors if the name
@@ -257,6 +289,8 @@ export async function createResource(opts: {
     title: opts.title ?? opts.name,
     tags: opts.tags ?? [],
     clis: opts.clis ?? [],
+    skills: [],
+    mcps: [],
     ...(opts.kind === "mcp"
       ? { mcpServer: opts.mcpServer ?? { command: "echo", args: ["configure me"] } }
       : {}),
@@ -766,6 +800,39 @@ export async function summon(opts: {
   });
 
   return { resource: r.name, kind: r.kind, cli, mode, scope, targets, gitignoreChanged };
+}
+
+/** Summon an agent together with its associated skills + mcps (from the agent's
+ *  manifest) into a workspace for a CLI. This powers the "spawn an agent and
+ *  bring its resources" journey. Returns each projection's result. Missing
+ *  associated resources are skipped (they may have been deleted). */
+export async function summonAgentBundle(opts: {
+  agent: Resource;
+  workspaceRoot: string;
+  cli?: Cli;
+  scope?: SummonScope;
+  copy?: boolean;
+}): Promise<SummonResult[]> {
+  const { agent, workspaceRoot, cli, scope, copy } = opts;
+  const results: SummonResult[] = [];
+  results.push(await summon({ resource: agent, workspaceRoot, cli, scope, copy }));
+  for (const skillName of agent.skills) {
+    try {
+      const skill = await getResource("skill", skillName);
+      results.push(await summon({ resource: skill, workspaceRoot, cli, scope, copy }));
+    } catch {
+      /* associated skill gone from catalog — skip */
+    }
+  }
+  for (const mcpName of agent.mcps) {
+    try {
+      const mcp = await getResource("mcp", mcpName);
+      results.push(await summon({ resource: mcp, workspaceRoot, cli, scope, copy }));
+    } catch {
+      /* associated mcp gone — skip */
+    }
+  }
+  return results;
 }
 
 /** Reverse a summon: remove the symlink/copy, strip the merged mcp server, or

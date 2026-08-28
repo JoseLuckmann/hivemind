@@ -193,7 +193,7 @@ export function loadLayout(repoPath: string | null): PersistedLayout {
     let tiles: TileInstance[];
     let editorTabs: Record<string, string[]>;
     if (Array.isArray(p.tiles)) {
-      tiles = p.tiles.filter((tile) => !["cmdButton", "trigger"].includes(tile.kind as string));
+      tiles = p.tiles.filter((tile) => !["cmdButton", "trigger", "catalog"].includes(tile.kind as string));
       editorTabs = (p.editorTabs && typeof p.editorTabs === "object" && !Array.isArray(p.editorTabs))
         ? (p.editorTabs as Record<string, string[]>)
         : {};

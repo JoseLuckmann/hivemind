@@ -10,13 +10,13 @@
  * its own status subscription; Canvas owns the data + focus actions.
  */
 import { useEffect, useState, type ReactNode, type PointerEvent as ReactPointerEvent, type DragEvent as ReactDragEvent } from "react";
-import { Layers, ChevronRight, ChevronDown, GitBranch, Server, Folder, FolderOpen, PanelLeftClose, Globe, GripVertical, PencilRuler, Boxes } from "lucide-react";
+import { Layers, ChevronRight, ChevronDown, GitBranch, Server, Folder, FolderOpen, PanelLeftClose, Globe, GripVertical, PencilRuler } from "lucide-react";
 import { subscribeStatus, type TileStatusKind } from "./agent-status-bus";
 import { AgentIcon } from "./agents";
 import { FrameRailMenu, type FrameActions } from "./FrameRailMenu";
 import { LOOSE_BUCKET, reorder, placeInto } from "./layers-order";
 
-export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file" | "explorer" | "board" | "catalog";
+export type LayerKind = "claude" | "terminal" | "editor" | "diff" | "issues" | "browser" | "planReview" | "workbench" | "file" | "explorer" | "board";
 
 export interface LayerTile {
   id: string;
@@ -118,8 +118,6 @@ const KIND_GLYPH: Record<LayerKind, string> = {
   explorer: "",
   // Rendered via the PencilRuler lucide icon below (same reasoning as browser).
   board: "",
-  // Rendered via the Boxes lucide icon below.
-  catalog: "",
 };
 
 /** Workspace identity glyph, keyed to the frame color — no boxed chip (the solid
@@ -427,9 +425,7 @@ export function LayersPanel({ frames, tiles, selectedTileId, onFocusTile, onFocu
                 ? <Folder size={12} aria-hidden />
                 : t.kind === "board"
                   ? <PencilRuler size={12} aria-hidden />
-                  : t.kind === "catalog"
-                    ? <Boxes size={12} aria-hidden />
-                    : KIND_GLYPH[t.kind]}
+                  : KIND_GLYPH[t.kind]}
         </span>
         {/* Name first, so every row's text starts at the same x. The badge used to
             lead, which pushed each name right by however wide its status happened

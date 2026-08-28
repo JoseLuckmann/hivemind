@@ -16,7 +16,7 @@
  * tile stays in LayersPanel, and clicking it there restores + activates it.
  */
 import { useMemo, type ReactNode } from "react";
-import { X, Minus, Globe, Folder, PencilRuler, Boxes } from "lucide-react";
+import { X, Minus, Globe, Folder, PencilRuler } from "lucide-react";
 import type { Node } from "@xyflow/react";
 import { LayersPanel, type LayerTile, type LayerFrame } from "./LayersPanel";
 import { TileBody } from "./canvas-nodes";
@@ -37,7 +37,6 @@ const KIND_GLYPH: Record<LayerTile["kind"], string> = {
   file: "≡",
   explorer: "",
   board: "",
-  catalog: "",
 };
 
 function TabGlyph({ tile }: { tile: LayerTile }): ReactNode {
@@ -45,7 +44,6 @@ function TabGlyph({ tile }: { tile: LayerTile }): ReactNode {
   if (tile.kind === "browser") return <Globe size={12} aria-hidden />;
   if (tile.kind === "explorer") return <Folder size={12} aria-hidden />;
   if (tile.kind === "board") return <PencilRuler size={12} aria-hidden />;
-  if (tile.kind === "catalog") return <Boxes size={12} aria-hidden />;
   return (
     <span aria-hidden className="font-mono text-[11px] text-[var(--color-fg3)]">
       {KIND_GLYPH[tile.kind]}

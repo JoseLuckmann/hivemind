@@ -264,7 +264,7 @@ export function useSpawn(ctx: SpawnCtx) {
         // canvas-node-build) and just reads "Explorer" until renamed.
         label = opts?.folder ? (opts.folder.split("/").filter(Boolean).pop() ?? opts.folder) : "Explorer";
       } else {
-        label = kind === "editor" ? "Editor" : kind === "diff" ? "Diff" : kind === "catalog" ? "Catalog" : "Issues";
+        label = kind === "editor" ? "Editor" : kind === "diff" ? "Diff" : "Issues";
       }
       placeInFrame(newId, frame);
       setTiles((cur) => [...cur, {
@@ -331,7 +331,7 @@ export function useSpawn(ctx: SpawnCtx) {
     }
     const k: TileKind =
       kind === "tree" ? "editor"
-      : kind === "claude" || kind === "shell" || kind === "diff" || kind === "issues" || kind === "browser" || kind === "explorer" || kind === "board" || kind === "catalog" ? kind
+      : kind === "claude" || kind === "shell" || kind === "diff" || kind === "issues" || kind === "browser" || kind === "explorer" || kind === "board" ? kind
       : "shell";
     spawnTile(k, frameId);
   }, [spawnTile]);

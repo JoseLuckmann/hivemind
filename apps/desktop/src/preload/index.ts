@@ -62,6 +62,8 @@ const api: HiveIpc & {
   catalogSummon: (opts) => ipcRenderer.invoke("catalogSummon", opts),
   catalogUnsummon: (opts) => ipcRenderer.invoke("catalogUnsummon", opts),
   catalogSummonList: (root) => ipcRenderer.invoke("catalogSummonList", root),
+  catalogSetAssociations: (name, assoc) => ipcRenderer.invoke("catalogSetAssociations", name, assoc),
+  catalogSummonBundle: (opts) => ipcRenderer.invoke("catalogSummonBundle", opts),
 
   getSyncConfig: (root) => ipcRenderer.invoke("getSyncConfig", root),
   setSyncConfig: (root, providerId, settings, secret) =>

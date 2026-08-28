@@ -7,6 +7,22 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+### Changed
+
+- **Agent catalog is now an application panel, not a canvas tile.** The catalog is a personal
+  agent marketplace — opened by the **Catalog** button (top-left of the canvas), it's a full-screen
+  panel that lists your agents / skills / MCPs in three columns and does the full CRUD: create, edit
+  (opens the canonical file in your OS editor), and delete. You can **associate** skills and MCPs with
+  an agent (a checkbox matrix that writes the agent's manifest), and **spawn** an agent (claude / codex
+  / kiro) into a workspace with its associated resources applied first. This replaces the earlier
+  attempt to render the catalog as a canvas tile.
+
+### Fixed
+
+- **White-screen crash from a persisted catalog tile.** A catalog opened as a canvas tile could render
+  a blank, unclosable tile and break the app; persisted `catalog` tiles are now dropped on load and the
+  catalog no longer exists as a tile kind.
+
 ## [1.19.0] — 2026-08-27
 
 ### Added

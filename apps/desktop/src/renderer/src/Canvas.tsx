@@ -17,7 +17,9 @@ import { Wallpaper } from "./Wallpaper";
 import { CanvasOverlay } from "./CanvasOverlay";
 import { ThemeCustomizer } from "./ThemeCustomizer";
 import { applyTheme } from "./theme-store";
-import { Eye, EyeOff, PencilRuler } from "lucide-react";
+import { Eye, EyeOff, PencilRuler, Boxes } from "lucide-react";
+import { CatalogPanel, type SpawnTarget } from "./CatalogPanel";
+import { toast } from "sonner";
 import { Toasts, CanvasEmptyState } from "./canvas-overlays";
 import { nodeTypes, PinnedLayerContext, type PinRect } from "./canvas-nodes";
 import { clampAnchor } from "./pin-anchor";
@@ -965,6 +967,54 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     setSelectedFrameId, setTiles, setSpawnPick, focusTile,
   });
 
+  // ── Agent Catalog panel (application-level surface, NOT a canvas tile) ──────
+  // Opened by a button / ⌘⇧A. Lists the machine-global catalog of resources
+  // (agents/skills/mcps) and can spawn an agent into a frame WITH its associated
+  // skills/mcps applied (summon-bundle → launch the CLI).
+  const [catalogOpen, setCatalogOpen] = useState(false);
+
+  // Frames the catalog can spawn into: those bound to a repo/worktree, de-duped.
+  const catalogTargets: SpawnTarget[] = useMemo(() => {
+    const out: SpawnTarget[] = [];
+    const seen = new Set<string>();
+    for (const f of frames) {
+      const repo = f.worktreePath ?? f.workspacePath;
+      if (repo && !seen.has(repo)) {
+        seen.add(repo);
+        out.push({ id: f.id, label: f.title || "frame", repoPath: repo });
+      }
+    }
+    return out;
+  }, [frames]);
+
+  // Spawn a catalog agent into a frame: apply its resources (summon bundle for
+  // the target CLI) first, then launch the matching agent CLI in that frame.
+  const spawnCatalogAgent = useCallback(
+    async (opts: { agentName: string; cli: string; repoPath: string }) => {
+      const frame = framesRef.current.find(
+        (f) => (f.worktreePath ?? f.workspacePath) === opts.repoPath,
+      );
+      try {
+        await window.hive.catalogSummonBundle({
+          agentName: opts.agentName,
+          workspaceRoot: opts.repoPath,
+          cli: opts.cli as "claude" | "kiro" | "codex",
+        });
+      } catch (e) {
+        toast.error("failed to apply catalog resources", { description: (e as Error).message });
+      }
+      // Launch the CLI in that frame. The catalog agent's CLI maps to a registry
+      // agent (claude/codex/…); fall back to claude if unknown.
+      const agent = agentById(opts.cli) ?? agentById("claude");
+      if (frame && agent) {
+        frameOpen(frame.id, agent.id);
+      } else if (agent) {
+        spawnAgent({ id: agent.id, cmd: agent.cmd, defaultArgs: agent.defaultArgs, label: agent.label });
+      }
+    },
+    [framesRef, frameOpen, spawnAgent],
+  );
+
   // Reparent a tile from the Layers panel — move it into another frame (or the
   // loose "Canvas" bucket) WITHOUT a canvas drag. Changing frameOf is enough for
   // the auto-fit effect to reflow both frames' geometry; placeInFrame packs the
@@ -1040,7 +1090,6 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     // to an editor tile; browser has no spawnVis variant so spawn it directly.
     if (kind === "browser") { spawnInto("browser"); return; }
     if (kind === "board") { spawnInto("board"); return; }
-    if (kind === "catalog") { spawnInto("catalog"); return; }
     spawnVis(kind === "tree" ? "tree" : (kind as "shell" | "diff" | "issues"));
   }, [frameOpen, spawnVis, spawnInto]);
   const menuSpawnFile = useCallback((frameId: string | null) => {
@@ -2088,6 +2137,22 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
           </Panel>
           )}
 
+          {/* Agent Catalog opener — top-left island. Opens the application-level
+              catalog panel (marketplace of agents/skills/mcps). Not a canvas tile. */}
+          {!zen && (
+          <Panel position="top-left" className="!m-0 !mt-3 !ml-3">
+            <button
+              onClick={() => setCatalogOpen(true)}
+              className="hm-island inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] font-medium text-[var(--color-fg)] hover:bg-[var(--color-bg3)] transition-colors cursor-pointer"
+              title="Agent Catalog — your agents, skills & MCPs"
+              aria-label="Open agent catalog"
+            >
+              <Boxes aria-hidden className="size-4 text-[var(--color-fg2)]" />
+              <span>Catalog</span>
+            </button>
+          </Panel>
+          )}
+
           {/* Roster removed — the top-left WorkspaceSwitcher (App) is the
               single workspace UI. Click a frame on the canvas to set active. */}
 
@@ -2205,6 +2270,12 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
         />
         <SyncSettingsModal root={syncSettingsRoot} onClose={() => setSyncSettingsRoot(null)} />
         <ThemeCustomizer open={customizerOpen} onClose={() => setCustomizerOpen(false)} />
+        <CatalogPanel
+          open={catalogOpen}
+          onClose={() => setCatalogOpen(false)}
+          targets={catalogTargets}
+          onSpawn={(o) => void spawnCatalogAgent(o)}
+        />
         {claudePick && (
           // z above the tile fullscreen overlay (z-[9999]) so the picker shows ON
           // TOP of a fullscreened diff/editor instead of behind it.
