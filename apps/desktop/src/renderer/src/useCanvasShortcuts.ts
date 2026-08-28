@@ -19,6 +19,8 @@ export interface CanvasShortcutsCtx {
   spawnVis: (which: "tree" | "editor" | "explorer" | "shell" | "diff" | "issues") => void;
   /** Spawn a Browser tile into the active/resolved frame. */
   spawnBrowser: () => void;
+  /** Spawn a drawing Board tile (Excalidraw) into the active/resolved frame. */
+  spawnBoard: () => void;
   addFrame: () => void;
   frameOpen: (frameId: string, kind: string) => void;
   focusTile: (id: string) => void;
@@ -32,7 +34,7 @@ export interface CanvasShortcutsCtx {
 
 export function useCanvasShortcuts(ctx: CanvasShortcutsCtx) {
   const {
-    repoPath, spawnClaude, spawnSelectedAgent, spawnVis, spawnBrowser, addFrame, frameOpen, focusTile,
+    repoPath, spawnClaude, spawnSelectedAgent, spawnVis, spawnBrowser, spawnBoard, addFrame, frameOpen, focusTile,
     setSelectedTileId, setFocusModeReq, selectedTileIdRef, selectedFrameIdRef,
     focusModeNonceRef, tilesRef,
   } = ctx;
@@ -79,7 +81,7 @@ export function useCanvasShortcuts(ctx: CanvasShortcutsCtx) {
       }
       // ── single-key tool hotkeys (number row only) — when NOT typing ──
       // Bare letter aliases were removed (a stray `a` spawned a claude session in
-      // a dev tool). Numbers match the ToolIsland hint badges 1-6.
+      // a dev tool). Numbers match the ToolIsland hint badges 1-8.
       if (inEditable(e.target)) return;
       switch (e.key) {
         case "1": e.preventDefault(); spawnVis("shell"); break;
@@ -89,6 +91,9 @@ export function useCanvasShortcuts(ctx: CanvasShortcutsCtx) {
         case "5": if (repoPath) { e.preventDefault(); spawnVis("issues"); } break;
         case "6": e.preventDefault(); addFrame(); break;
         case "7": e.preventDefault(); spawnBrowser(); break;
+        case "8": e.preventDefault(); spawnBoard(); break;
+        // Shift+8 ("*") opens an EXISTING board instead of spawning a blank one.
+        case "*": e.preventDefault(); window.dispatchEvent(new CustomEvent("hivemind:open-board")); break;
         case "F2": {
           const sel = selectedFrameIdRef.current;
           if (!sel) return;

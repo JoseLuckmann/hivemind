@@ -32,11 +32,18 @@ export function defaultSizeForKind(kind: TileKind): { width: number; height: num
       return { width: 900, height: 640 };
     case "issues":
       return { width: 680, height: 460 };
+    case "catalog":
+      // A list of resources + a summon toolbar — compact like the issues tile.
+      return { width: 620, height: 560 };
     case "planReview":
       // Large by default — a plan + the annotation panel need width to read the
       // full markdown (tables, code blocks) without constant scrolling.
       return { width: 1280, height: 920 };
     case "browser":
+      return { width: 1280, height: 860 };
+    case "board":
+      // A drawing surface wants room — Excalidraw's toolbar + a workable canvas
+      // read cramped in a small box. Roughly matches the browser tile's footprint.
       return { width: 1280, height: 860 };
     case "claude":
       // Compact default — the larger 15px terminal font makes a smaller tile

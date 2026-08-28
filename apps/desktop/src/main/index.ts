@@ -24,6 +24,13 @@ import {
   writeConfig,
   templates,
   sync,
+  listResources as catalogListResources,
+  getResource as catalogGetResource,
+  createResource as catalogCreateResource,
+  removeResource as catalogRemoveResource,
+  summon as catalogSummonCore,
+  unsummon as catalogUnsummonCore,
+  summonList as catalogSummonListCore,
   type IssueState,
   type LinkType,
 } from "@hivemind/core";
@@ -103,6 +110,8 @@ import { SUBMIT_DELAY_MS, INITIAL_PROMPT_ENV } from "../shared/agent-io.js";
 import type {
   DiffScope,
   WorktreeCreateOpts,
+  CatalogResourceKind,
+  CatalogCli,
 } from "../shared/ipc.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -873,6 +882,62 @@ ipcMain.handle(
   }),
 );
 ipcMain.handle("listIssues", wrap(async (_e, root: string) => listIssues(root)));
+
+// ── agent catalog (resources: agents / skills / mcps) ───────────────────────
+ipcMain.handle("catalogList", wrap(async () => catalogListResources()));
+ipcMain.handle(
+  "catalogNew",
+  wrap(async (_e, opts: { kind: CatalogResourceKind; name: string; title?: string; tags?: string[] }) =>
+    catalogCreateResource(opts),
+  ),
+);
+ipcMain.handle(
+  "catalogRemove",
+  wrap(async (_e, kind: CatalogResourceKind, name: string) => {
+    await catalogRemoveResource(kind, name);
+    return { ok: true as const };
+  }),
+);
+ipcMain.handle(
+  "catalogCanonicalPath",
+  wrap(async (_e, kind: CatalogResourceKind, name: string) => {
+    const r = await catalogGetResource(kind, name);
+    return { path: r.canonicalFile };
+  }),
+);
+ipcMain.handle(
+  "catalogOpen",
+  wrap(async (_e, kind: CatalogResourceKind, name: string) => {
+    const r = await catalogGetResource(kind, name);
+    const target = r.canonicalFile ?? `${r.dir}/resource.yaml`;
+    const error = await shell.openPath(target); // "" on success
+    return error ? { ok: false, error } : { ok: true };
+  }),
+);
+ipcMain.handle(
+  "catalogSummon",
+  wrap(async (_e, opts: { kind: CatalogResourceKind; name: string; workspaceRoot: string; cli?: CatalogCli; scope?: "project" | "global"; copy?: boolean }) => {
+    const resource = await catalogGetResource(opts.kind, opts.name);
+    return catalogSummonCore({ resource, workspaceRoot: opts.workspaceRoot, cli: opts.cli, scope: opts.scope, copy: opts.copy });
+  }),
+);
+ipcMain.handle(
+  "catalogUnsummon",
+  wrap(async (_e, opts: { name: string; workspaceRoot: string; cli?: CatalogCli; scope?: "project" | "global" }) => {
+    const removed = await catalogUnsummonCore({
+      resourceName: opts.name,
+      workspaceRoot: opts.workspaceRoot,
+      cli: opts.cli,
+      scope: opts.scope,
+    });
+    return { removed };
+  }),
+);
+ipcMain.handle(
+  "catalogSummonList",
+  wrap(async (_e, workspaceRoot: string) => catalogSummonListCore(workspaceRoot)),
+);
+
 // ── cross-repo: registry + transfer + links ─────────────────────────────
 ipcMain.handle("listWorkspaces", wrap(async () => listWorkspaces({ persistPrune: true })));
 ipcMain.handle(
@@ -1147,6 +1212,19 @@ ipcMain.handle("fileWrite", wrap((_e, repoPath: string, relPath: string, content
     ? writeRemoteFile(repoPath, assertRemoteRel(relPath), contents)
     : fsp.writeFile(resolveInRepo(repoPath, relPath), contents, "utf8")
 ));
+// List the file NAMES (basenames) in a repo-relative directory — used by the
+// board picker to enumerate `.hivemind/boards/*.excalidraw`. A missing dir
+// returns [] (not an error) so callers can treat "no boards yet" uniformly.
+// Local only: remote board picking isn't wired (boards are a local-repo feature).
+ipcMain.handle("listDir", wrap(async (_e, repoPath: string, relDir: string) => {
+  if (isRemote(repoPath)) return [] as string[];
+  try {
+    const entries = await fsp.readdir(resolveInRepo(repoPath, relDir), { withFileTypes: true });
+    return entries.filter((d) => d.isFile()).map((d) => d.name);
+  } catch {
+    return [] as string[];
+  }
+}));
 // Binary read → base64, for the image reference tile. Remote (SFTP) reads come
 // back as a UTF-8 string; base64-encoding that would corrupt real binary bytes,
 // so remote is limited to text-ish images (svg). Local reads the raw Buffer.

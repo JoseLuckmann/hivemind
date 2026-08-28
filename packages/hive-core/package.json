@@ -12,6 +12,7 @@
     "./query": "./src/query.ts",
     "./agent-context": "./src/agent-context.ts",
     "./registry": "./src/registry.ts",
+    "./catalog": "./src/catalog.ts",
     "./cross-repo": "./src/cross-repo.ts",
     "./templates": "./src/templates.ts",
     "./sync": "./src/sync/index.ts"

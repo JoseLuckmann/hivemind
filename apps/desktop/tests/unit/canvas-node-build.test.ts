@@ -93,6 +93,38 @@ test("editor/diff tiles are skipped when there's no repo", () => {
   assert.ok(nodes.find((n) => n.id === "sh"), "shell still rendered");
 });
 
+// ── board tiles (Excalidraw) ────────────────────────────────────────────────
+
+test("an UNSAVED board (no boardFile) renders even without a repo — it's in-memory", () => {
+  const nodes = buildBaseNodes(ctx({
+    repoPath: null, root: null,
+    tiles: [tile({ id: "bd", kind: "board", label: "Board #1" })],
+  }));
+  const bd = nodes.find((n) => n.id === "bd");
+  assert.ok(bd, "unsaved board renders with no repo (like a scratch note)");
+  assert.equal(bd!.type, "board");
+  const data = bd!.data as Record<string, unknown>;
+  assert.equal(data.boardFile, undefined, "unsaved board carries no boardFile");
+});
+
+test("a BOUND board (has boardFile) is repo-gated: skipped without a repo, carries its path with one", () => {
+  // No repo → the bound board can't resolve its path, so it's skipped.
+  const skipped = buildBaseNodes(ctx({
+    repoPath: null, root: null,
+    tiles: [tile({ id: "bd", kind: "board", label: "sketch", boardFile: ".hivemind/boards/sketch.excalidraw" })],
+  }));
+  assert.equal(skipped.find((n) => n.id === "bd"), undefined, "bound board skipped without a repo");
+
+  // With a repo → renders, carries repoPath + boardFile through to the tile data.
+  const nodes = buildBaseNodes(ctx({
+    tiles: [tile({ id: "bd", kind: "board", label: "sketch", boardFile: ".hivemind/boards/sketch.excalidraw" })],
+    positions: { bd: { x: 0, y: 0 } },
+  }));
+  const data = byId(nodes, "bd").data as Record<string, unknown>;
+  assert.equal(data.repoPath, "/base/repo");
+  assert.equal(data.boardFile, ".hivemind/boards/sketch.excalidraw");
+});
+
 // ── N-level nesting (frames within frames) ──────────────────────────────────
 
 test("grandchild tile inherits the enclosing WORKSPACE zone via parent-chain walk-up", () => {

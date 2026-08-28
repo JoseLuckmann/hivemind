@@ -52,6 +52,15 @@ import {
   writeAgentContext,
   writeIssue,
   type IssueState,
+  listResources as catalogListResources,
+  getResource as catalogGetResource,
+  createResource as catalogCreateResource,
+  removeResource as catalogRemoveResource,
+  summon as catalogSummonCore,
+  unsummon as catalogUnsummonCore,
+  summonList as catalogSummonListCore,
+  type ResourceKind as CatalogResourceKind,
+  type Cli as CatalogCli,
 } from "@hivemind/core";
 import type { IssuePatch } from "@hivemind/core/storage";
 import {
@@ -212,6 +221,14 @@ const PREVIEW_SCRIPT = `
     updateIssue:       (r,i,p) => call("updateIssue", r, i, p),
     commentOnIssue:    (r,i,m) => call("commentOnIssue", r, i, m),
     deleteIssue:       (r,i) => call("deleteIssue", r, i),
+    catalogList:          () => call("catalogList"),
+    catalogNew:           (o) => call("catalogNew", o),
+    catalogRemove:        (k,n) => call("catalogRemove", k, n),
+    catalogCanonicalPath: (k,n) => call("catalogCanonicalPath", k, n),
+    catalogOpen:          (k,n) => call("catalogOpen", k, n),
+    catalogSummon:        (o) => call("catalogSummon", o),
+    catalogUnsummon:      (o) => call("catalogUnsummon", o),
+    catalogSummonList:    (r) => call("catalogSummonList", r),
     gitStatus:         (r) => call("gitStatus", r),
     gitListFiles:      (r) => call("gitListFiles", r),
     gitDiff:           (r,s,f) => call("gitDiff", r, s, f),
@@ -276,6 +293,36 @@ const RPC: Record<string, (...args: unknown[]) => Promise<unknown> | unknown> = 
     await writeAgentContext(root);
     return null;
   },
+  catalogList: () => catalogListResources(),
+  catalogNew: (opts: { kind: CatalogResourceKind; name: string; title?: string; tags?: string[] }) =>
+    catalogCreateResource(opts),
+  catalogRemove: async (kind: CatalogResourceKind, name: string) => {
+    await catalogRemoveResource(kind, name);
+    return { ok: true as const };
+  },
+  catalogCanonicalPath: async (kind: CatalogResourceKind, name: string) => {
+    const r = await catalogGetResource(kind, name);
+    return { path: r.canonicalFile };
+  },
+  catalogOpen: async (kind: CatalogResourceKind, name: string) => {
+    // dev-bridge has no Electron shell — report the path so the caller can act.
+    const r = await catalogGetResource(kind, name);
+    return { ok: false, error: `open ${r.canonicalFile ?? r.dir} manually (dev-bridge)` };
+  },
+  catalogSummon: async (opts: { kind: CatalogResourceKind; name: string; workspaceRoot: string; cli?: CatalogCli; scope?: "project" | "global"; copy?: boolean }) => {
+    const resource = await catalogGetResource(opts.kind, opts.name);
+    return catalogSummonCore({ resource, workspaceRoot: opts.workspaceRoot, cli: opts.cli, scope: opts.scope, copy: opts.copy });
+  },
+  catalogUnsummon: async (opts: { name: string; workspaceRoot: string; cli?: CatalogCli; scope?: "project" | "global" }) => {
+    const removed = await catalogUnsummonCore({
+      resourceName: opts.name,
+      workspaceRoot: opts.workspaceRoot,
+      cli: opts.cli,
+      scope: opts.scope,
+    });
+    return { removed };
+  },
+  catalogSummonList: (workspaceRoot: string) => catalogSummonListCore(workspaceRoot),
   gitStatus: (r: string) => gitStatus(r),
   gitListFiles: (r: string) => gitListFiles(r),
   gitDiff: (r: string, s: Parameters<typeof gitDiff>[1], f?: string) => gitDiff(r, s, f),

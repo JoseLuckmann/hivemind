@@ -7,6 +7,42 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+### Added
+
+- **Board tile (Excalidraw).** A drawing surface on the canvas — sketch shapes, text, arrows, and
+  freehand next to your terminals and diffs. Spawn a blank board with the tool-island **Board** button
+  or hotkey **8**; it stays in-memory (like a scratch note) until you hit **Save…**, which writes it to
+  `.hivemind/boards/<name>.excalidraw` — plain JSON, versionable with the rest of the tracker. Once
+  saved it **autosaves** on every edit. Reopen a saved board from the Board button's **▾** menu (or
+  **Shift+8**). The appearance/theme customizer moved from the tool island to the bottom-left zoom
+  island to make room for Board.
+- **Agent catalog + `summon`.** A machine-global catalog of reusable *resources* — agents, skills,
+  and MCP servers — you author once and *summon* into any workspace on demand, so the same agent/skill
+  configured in one place lands wherever you need it. `hive catalog new agent|skill|mcp <name>`,
+  `hive catalog list`, `hive catalog edit <name>` ($EDITOR), and `hive catalog rm <name>` manage the
+  catalog (stored under `~/.config/hivemind/catalog/`, alongside the workspace registry). `hive summon
+  <name> [--to <prefix|path>]` projects a resource into a workspace: agents/skills are **symlinked**
+  into `.claude/` (edit-once, propagates everywhere — no file copies), and MCP servers **merge** into
+  `.mcp.json` (reversible, preserving other servers). Summoned material is **never committed** — the
+  target repo's `.gitignore` is updated automatically, and the summon ledger lives out of the repo.
+  `hive summon list` shows what's **summoned (global)** vs. **local (repo-authored)** in a workspace,
+  and `hive unsummon <name>` reverses a projection exactly. Targets `claude`, `kiro`, and `codex` via
+  `--cli`: claude/kiro symlink agents/skills and merge MCP into their JSON config; codex (which has no
+  per-resource files) marker-merges agent/skill prose into `AGENTS.md` and MCP servers as
+  `[mcp_servers.<name>]` blocks in `.codex/config.toml` — both reversible.
+- **Catalog tile.** The agent catalog is now a first-class canvas tile: browse every resource grouped
+  by kind (agents / skills / mcps), create new ones inline, open a resource's canonical file in your OS
+  editor (edits propagate to every summon, since summons are symlinks), and **summon into a frame** —
+  pick any frame bound to a repo (or worktree) on the canvas plus a target CLI, and the resource
+  projects into that workspace. A per-target view shows what's already summoned there, with one-click
+  unsummon. Spawn it from the frame **+** menu ("Catalog") like any other tile.
+- **Summon scope + copy.** `hive summon --global` projects a resource into the CLI's machine-wide
+  scope (`~/.claude`, `$KIRO_HOME`/`~/.kiro`, `~/.codex`) so it's available across every workspace
+  without touching any repo — no `.gitignore` needed. `--copy` copies the files instead of symlinking
+  (automatically forced for remote SSH targets, where a symlink into the local catalog can't resolve).
+  Both are reversible via `hive unsummon [--global]`, and the Catalog tile gains a **global** toggle.
+  Project and global summons of the same resource coexist independently.
+
 ## [1.18.0-flow.1] — 2026-08-27
 
 ### Added

@@ -11,6 +11,26 @@ export type { CmdButtonState, CmdButtonStatus } from "./command-button.js";
 // modules keep importing it from the IPC contract, with no hand-maintained copy.
 export type { IssuePatch };
 
+// Agent-catalog types are owned by @hivemind/core/catalog. `import type` erases
+// at compile time, so pulling them into the shared IPC contract never drags the
+// node-only catalog implementation into the renderer bundle.
+import type {
+  Resource as CatalogResource,
+  ResourceKind as CatalogResourceKind,
+  Cli as CatalogCli,
+  SummonResult as CatalogSummonResult,
+  SummonView as CatalogSummonView,
+  SummonEntry as CatalogSummonEntry,
+} from "@hivemind/core/catalog";
+export type {
+  CatalogResource,
+  CatalogResourceKind,
+  CatalogCli,
+  CatalogSummonResult,
+  CatalogSummonView,
+  CatalogSummonEntry,
+};
+
 /** A board's external-tracker sync config, as the renderer sees it — never
  *  the secret itself, just whether one is saved. */
 export interface SyncBoardConfig {
@@ -273,6 +293,43 @@ export interface HiveIpc {
   commentOnIssue(root: string, id: string, message: string): Promise<Issue>;
   deleteIssue(root: string, id: string): Promise<void>;
 
+  // ── agent catalog (resources: agents / skills / mcps) ───────
+  /** List every resource in the machine-global catalog. */
+  catalogList(): Promise<CatalogResource[]>;
+  /** Create a new catalog resource (scaffolds its canonical file). */
+  catalogNew(opts: {
+    kind: CatalogResourceKind;
+    name: string;
+    title?: string;
+    tags?: string[];
+  }): Promise<CatalogResource>;
+  /** Delete a catalog resource by kind+name. */
+  catalogRemove(kind: CatalogResourceKind, name: string): Promise<{ ok: true }>;
+  /** Absolute path to a resource's canonical file (for opening in the editor). */
+  catalogCanonicalPath(kind: CatalogResourceKind, name: string): Promise<{ path: string | null }>;
+  /** Open a resource's canonical file in the OS default editor (shell.openPath).
+   *  A robust, canvas-agnostic edit path — the file lives outside any repo, so
+   *  the repo-relative EditorTile doesn't fit it cleanly. */
+  catalogOpen(kind: CatalogResourceKind, name: string): Promise<{ ok: boolean; error?: string }>;
+  /** Summon a resource into a workspace for a CLI (default claude). */
+  catalogSummon(opts: {
+    kind: CatalogResourceKind;
+    name: string;
+    workspaceRoot: string;
+    cli?: CatalogCli;
+    scope?: "project" | "global";
+    copy?: boolean;
+  }): Promise<CatalogSummonResult>;
+  /** Reverse a summon. Returns whether anything was removed. */
+  catalogUnsummon(opts: {
+    name: string;
+    workspaceRoot: string;
+    cli?: CatalogCli;
+    scope?: "project" | "global";
+  }): Promise<{ removed: boolean }>;
+  /** What's summoned (global) vs local (repo-authored) in a workspace. */
+  catalogSummonList(workspaceRoot: string): Promise<CatalogSummonView>;
+
   // ── external-tracker sync (Azure DevOps, ...) ───────────────
   /** This board's sync config, or null if it isn't linked to a tracker.
    *  `hasSecret` tells the UI whether a PAT is already saved — the secret
@@ -360,6 +417,9 @@ export interface HiveIpc {
   fileRead(repoPath: string, relPath: string): Promise<string>;
   /** Write UTF-8 contents to a repo-relative file. Rejects path traversal. */
   fileWrite(repoPath: string, relPath: string, contents: string): Promise<void>;
+  /** List file basenames in a repo-relative directory (missing dir → []).
+   *  Local repos only; used by the board picker to enumerate saved boards. */
+  listDir(repoPath: string, relDir: string): Promise<string[]>;
   /** Read a repo-relative BINARY file as base64 (for image reference tiles).
    *  Rejects path traversal outside repoPath; supports remote (SFTP) repos. */
   fileReadBase64(repoPath: string, relPath: string): Promise<string>;

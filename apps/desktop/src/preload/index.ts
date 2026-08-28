@@ -54,6 +54,15 @@ const api: HiveIpc & {
     ipcRenderer.invoke("commentOnIssue", root, id, message),
   deleteIssue: (root, id) => ipcRenderer.invoke("deleteIssue", root, id),
 
+  catalogList: () => ipcRenderer.invoke("catalogList"),
+  catalogNew: (opts) => ipcRenderer.invoke("catalogNew", opts),
+  catalogRemove: (kind, name) => ipcRenderer.invoke("catalogRemove", kind, name),
+  catalogCanonicalPath: (kind, name) => ipcRenderer.invoke("catalogCanonicalPath", kind, name),
+  catalogOpen: (kind, name) => ipcRenderer.invoke("catalogOpen", kind, name),
+  catalogSummon: (opts) => ipcRenderer.invoke("catalogSummon", opts),
+  catalogUnsummon: (opts) => ipcRenderer.invoke("catalogUnsummon", opts),
+  catalogSummonList: (root) => ipcRenderer.invoke("catalogSummonList", root),
+
   getSyncConfig: (root) => ipcRenderer.invoke("getSyncConfig", root),
   setSyncConfig: (root, providerId, settings, secret) =>
     ipcRenderer.invoke("setSyncConfig", root, providerId, settings, secret),
@@ -96,6 +105,7 @@ const api: HiveIpc & {
   fileRead: (repoPath, relPath) => ipcRenderer.invoke("fileRead", repoPath, relPath),
   fileWrite: (repoPath, relPath, contents) =>
     ipcRenderer.invoke("fileWrite", repoPath, relPath, contents),
+  listDir: (repoPath, relDir) => ipcRenderer.invoke("listDir", repoPath, relDir),
   fileReadBase64: (repoPath, relPath) => ipcRenderer.invoke("fileReadBase64", repoPath, relPath),
   openPathInApp: (cwd, target) => ipcRenderer.invoke("openPathInApp", cwd, target),
 

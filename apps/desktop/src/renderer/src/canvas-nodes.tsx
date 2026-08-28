@@ -24,6 +24,7 @@ import { clampAnchor } from "./pin-anchor";
 import { TerminalTile } from "./TerminalTile";
 import { BrowserTile } from "./BrowserTile";
 import { IssuesTile } from "./IssuesTile";
+import { CatalogTile, type SummonTarget } from "./CatalogTile";
 import { PlanReviewTile } from "./PlanReviewTile";
 import { FileTile } from "./FileTile";
 import { FrameNode, type FrameNodeData } from "./FrameNode";
@@ -33,6 +34,9 @@ import { TileErrorBoundary } from "./TileErrorBoundary";
 const DiffTile = lazy(() => import("./DiffTile").then((m) => ({ default: m.DiffTile })));
 const WorkbenchTile = lazy(() => import("./WorkbenchTile").then((m) => ({ default: m.WorkbenchTile })));
 const FileExplorerTile = lazy(() => import("./FileExplorerTile").then((m) => ({ default: m.FileExplorerTile })));
+// Board pulls in Excalidraw (a heavy canvas engine + its own CSS) — lazy so it
+// only loads when a board tile is actually mounted, not on every canvas open.
+const BoardTile = lazy(() => import("./BoardTile").then((m) => ({ default: m.BoardTile })));
 
 /** Screen-space rect captured from a tile's DOM at pin time (SCREEN pixels). */
 export type PinRect = { sx: number; sy: number; w: number; h: number };
@@ -682,6 +686,23 @@ export function TileBody({
           />
         </TileErrorBoundary>
       );
+    case "board":
+      return (
+        <TileErrorBoundary label="Board" onClose={data.onClose as (() => void) | undefined}>
+          <Suspense fallback={<TileLoading label="Loading board…" />}>
+            <BoardTile
+              tileId={data.tileId as string}
+              repoPath={data.repoPath as string | null}
+              boardFile={data.boardFile as string | undefined}
+              onSaveBoard={data.onSaveBoard as ((sceneJson: string) => void) | undefined}
+              selected={selected}
+              onClose={data.onClose as () => void}
+              pinned={data.pinned as boolean | undefined}
+              onTogglePin={data.onTogglePin as never}
+            />
+          </Suspense>
+        </TileErrorBoundary>
+      );
     case "issues":
       return (
         <TileErrorBoundary label="Issues" onClose={data.onClose as (() => void) | undefined}>
@@ -698,6 +719,20 @@ export function TileBody({
       return (
         <TileErrorBoundary label="Plan review" onClose={data.onClose as (() => void) | undefined}>
           <PlanReviewTile {...(data as unknown as PlanReviewNodeData)} />
+        </TileErrorBoundary>
+      );
+    case "catalog":
+      return (
+        <TileErrorBoundary label="Catalog" onClose={data.onClose as (() => void) | undefined}>
+          <CatalogTile
+            repoPath={data.repoPath as string | null}
+            targets={data.targets as SummonTarget[] | undefined}
+            onEdit={data.onEdit as ((path: string) => void) | undefined}
+            onClose={data.onClose as () => void}
+            selected={selected}
+            pinned={data.pinned as boolean | undefined}
+            onTogglePin={data.onTogglePin as never}
+          />
         </TileErrorBoundary>
       );
     default:
@@ -826,6 +861,30 @@ const BrowserNode = memo(function BrowserNode({
   );
 });
 
+type BoardNodeData = {
+  tileId: string;
+  repoPath: string | null;
+  boardFile?: string;
+  onSaveBoard?: (sceneJson: string) => void;
+  onClose?: () => void;
+};
+const BoardNode = memo(function BoardNode({
+  id,
+  data,
+  selected,
+}: {
+  id: string;
+  data: WithResize<BoardNodeData>;
+  selected: boolean;
+}) {
+  const wheelRef = useTileWheelZoom(selected);
+  return (
+    <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={480} minHeight={320} wheelRef={wheelRef}>
+      <TileBody type="board" data={data as unknown as Record<string, unknown>} selected={selected} />
+    </TileShell>
+  );
+});
+
 type IssuesNodeData = { root: string | null; onClose: () => void };
 const IssuesNode = memo(function IssuesNode({
   id,
@@ -889,6 +948,7 @@ export const nodeTypes: NodeTypes = {
   explorer: ExplorerNode as unknown as NodeTypes[string],
   issues: IssuesNode as unknown as NodeTypes[string],
   browser: BrowserNode as unknown as NodeTypes[string],
+  board: BoardNode as unknown as NodeTypes[string],
   planReview: PlanReviewNode as unknown as NodeTypes[string],
   frame: FrameNodeWrapper as unknown as NodeTypes[string],
 };

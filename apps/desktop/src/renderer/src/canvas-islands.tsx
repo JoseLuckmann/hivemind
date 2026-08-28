@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
-import { FolderTree, FileCode2, FilePlus2 } from "lucide-react";
+import { FolderTree, FileCode2, FilePlus2, PencilRuler, Palette } from "lucide-react";
 import { AGENTS, AgentIcon, agentById } from "./agents";
 
 /** Top-center tool island — spawn terminal/agent/explorer/editor/diff/tasks/file/frame. */
@@ -20,7 +20,8 @@ export function ToolIsland({
   onSpawnAgent,
   onFrame,
   onBrowser,
-  onTheme,
+  onBoard,
+  onOpenBoard,
   updateAvailable,
   onUpgrade,
   upgrading,
@@ -35,9 +36,12 @@ export function ToolIsland({
   onSpawnAgent: (agent: { id: string; cmd: string; defaultArgs?: string[]; label: string }) => void;
   onFrame: () => void;
   onBrowser: () => void;
-  onTheme: () => void;
-  /** A newer GitHub release exists → show the "Update available" pill next to
-   *  Theme. The full update UI lives in the top-right Settings dialog. */
+  /** Spawn a drawing Board tile (Excalidraw). Hotkey 8. */
+  onBoard: () => void;
+  /** Open an EXISTING board (picker of `.hivemind/boards/*.excalidraw`). */
+  onOpenBoard: () => void;
+  /** A newer GitHub release exists → show the "Update available" pill at the end
+   *  of the island. The full update UI lives in the top-right Settings dialog. */
   updateAvailable: boolean;
   /** Run the upgrade + restart (from the pill). */
   onUpgrade: () => void;
@@ -110,8 +114,18 @@ export function ToolIsland({
         icon={<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M5 2v12M11 2v12M2 5h12M2 11h12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>} />
       <ToolButton label="Browser" hint="7" onClick={onBrowser}
         icon={<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2"/><ellipse cx="8" cy="8" rx="2.6" ry="6" stroke="currentColor" strokeWidth="1.1"/><path d="M2 8h12" stroke="currentColor" strokeWidth="1.1"/></svg>} />
-      <ToolButton label="Theme" hint="8" onClick={onTheme}
-        icon={<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 1.5a6.5 6.5 0 0 0 0 13c.83 0 1.5-.67 1.5-1.5 0-.4-.16-.76-.41-1.03-.24-.26-.39-.6-.39-.97 0-.83.67-1.5 1.5-1.5H11a3.5 3.5 0 0 0 3.5-3.5C14.5 4.3 11.6 1.5 8 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><circle cx="5" cy="6.5" r="0.9" fill="currentColor"/><circle cx="8" cy="5" r="0.9" fill="currentColor"/><circle cx="11" cy="6.5" r="0.9" fill="currentColor"/></svg>} />
+      <div className="relative flex items-center">
+        <ToolButton label="Board" hint="8" onClick={onBoard}
+          icon={<PencilRuler size={15} />} />
+        <button
+          onClick={onOpenBoard}
+          title="Open an existing board"
+          aria-label="open existing board"
+          className="grid place-items-center h-9 w-4 -ml-1 text-[var(--color-fg3)] hover:text-[var(--color-fg)] cursor-pointer"
+        >
+          <svg width="8" height="8" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" /></svg>
+        </button>
+      </div>
       {/* "Update available — restart to update" pill. Only when a newer release
           exists; clicking runs the installer + quits. (Full update status +
           version + repo/license live in the top-right Settings dialog.) */}
@@ -175,7 +189,7 @@ function ToolButton({
 
 /** Bottom-left zoom + nav island (Excalidraw footer). Uses react-flow's
  *  imperative camera API; lives inside <ReactFlow> so the hooks resolve. */
-export function ZoomIsland({ tileCount, onReset, minimapOn, onToggleMinimap, onFocus }: { tileCount: number; onReset: () => void; minimapOn: boolean; onToggleMinimap: () => void; onFocus: () => void }) {
+export function ZoomIsland({ tileCount, onReset, minimapOn, onToggleMinimap, onFocus, onTheme }: { tileCount: number; onReset: () => void; minimapOn: boolean; onToggleMinimap: () => void; onFocus: () => void; onTheme: () => void }) {
   const { zoomIn, zoomOut, zoomTo, fitView } = useReactFlow();
   const zoom = useStore((s) => s.transform[2]);
   const pct = Math.round(zoom * 100);
@@ -210,6 +224,12 @@ export function ZoomIsland({ tileCount, onReset, minimapOn, onToggleMinimap, onF
         </IslandBtn>
         <IslandBtn title={fpsOn ? "Hide FPS meter" : "Show FPS meter (watch it while dragging)"} onClick={() => setFpsOn((v) => !v)}>
           <svg width="13" height="13" viewBox="0 0 14 14" fill="none" opacity={fpsOn ? 1 : 0.5}><path d="M2 10l3-4 2.5 2L12 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </IslandBtn>
+        {/* Appearance customizer (glass / wallpaper / accent). Moved here from the
+            top tool island so Board could take its slot + hotkey; a theme toggle
+            reads naturally alongside the minimap / FPS view controls. */}
+        <IslandBtn title="Appearance — glass, wallpaper, accent" onClick={onTheme}>
+          <Palette size={13} />
         </IslandBtn>
       </div>
       {fpsOn && <FpsMeter />}

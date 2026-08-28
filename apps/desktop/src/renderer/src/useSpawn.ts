@@ -19,7 +19,7 @@ import type { TileKind } from "./tile-kinds";
 const SINGLETON_KINDS: ReadonlySet<TileKind> = new Set(["editor", "diff", "issues"]);
 
 type FocusReq = { id: string; cx: number; cy: number; w: number; h: number; n: number; exact?: boolean } | null;
-type SpawnOpts = { mode?: string; work?: string; url?: string; file?: string; folder?: string; agent?: { id: string; cmd: string; args?: string[]; label: string }; issueId?: string; issueRoot?: string };
+type SpawnOpts = { mode?: string; work?: string; url?: string; file?: string; folder?: string; boardFile?: string; agent?: { id: string; cmd: string; args?: string[]; label: string }; issueId?: string; issueRoot?: string };
 type SpawnPick = ({ kind: TileKind } & SpawnOpts) | null;
 
 export interface SpawnCtx {
@@ -247,6 +247,13 @@ export function useSpawn(ctx: SpawnCtx) {
         label = `shell #${n}`;
       } else if (kind === "browser") {
         label = `Browser #${n}`;
+      } else if (kind === "board") {
+        // Unsaved board — named generically until the user saves it (then the
+        // tile shows the file's basename). Mirrors the scratch-file naming.
+        // Opening an EXISTING board carries its file → name after the basename.
+        label = opts?.boardFile
+          ? (opts.boardFile.split("/").pop() ?? opts.boardFile).replace(/\.excalidraw$/i, "")
+          : `Board #${n}`;
       } else if (kind === "file") {
         // A single-file tile is named after its file (basename); the full
         // repo-relative path rides on the TileInstance below.
@@ -257,12 +264,13 @@ export function useSpawn(ctx: SpawnCtx) {
         // canvas-node-build) and just reads "Explorer" until renamed.
         label = opts?.folder ? (opts.folder.split("/").filter(Boolean).pop() ?? opts.folder) : "Explorer";
       } else {
-        label = kind === "editor" ? "Editor" : kind === "diff" ? "Diff" : "Issues";
+        label = kind === "editor" ? "Editor" : kind === "diff" ? "Diff" : kind === "catalog" ? "Catalog" : "Issues";
       }
       placeInFrame(newId, frame);
       setTiles((cur) => [...cur, {
         id: newId, kind, label, cmd, args,
         ...(kind === "browser" && opts?.url ? { url: opts.url } : {}),
+        ...(kind === "board" && opts?.boardFile ? { boardFile: opts.boardFile } : {}),
         ...(kind === "file" && opts?.file ? { file: opts.file } : {}),
         ...(kind === "explorer" && opts?.folder ? { folder: opts.folder } : {}),
         ...(opts?.issueId ? { issueId: opts.issueId, ...(opts.issueRoot ? { issueRoot: opts.issueRoot } : {}) } : {}),
@@ -323,7 +331,7 @@ export function useSpawn(ctx: SpawnCtx) {
     }
     const k: TileKind =
       kind === "tree" ? "editor"
-      : kind === "claude" || kind === "shell" || kind === "diff" || kind === "issues" || kind === "browser" || kind === "explorer" ? kind
+      : kind === "claude" || kind === "shell" || kind === "diff" || kind === "issues" || kind === "browser" || kind === "explorer" || kind === "board" || kind === "catalog" ? kind
       : "shell";
     spawnTile(k, frameId);
   }, [spawnTile]);

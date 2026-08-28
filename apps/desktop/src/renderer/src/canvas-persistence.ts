@@ -36,6 +36,12 @@ export interface TileInstance {
    *  tile reopens pointed at the same folder (e.g. a subfolder an agent
    *  writes into, not necessarily the frame's repo root). */
   folder?: string;
+  /** board only — the repo-relative `.excalidraw` file this drawing board is
+   *  saved to (e.g. `.hivemind/boards/sketch.excalidraw`). Unset ⇒ an unsaved,
+   *  in-memory board (like a scratch note) that lives only until the user hits
+   *  Save…; once saved, the board autosaves back to this path on every edit and
+   *  the path persists so the tile reopens on the same drawing. */
+  boardFile?: string;
   /** Pinned = the tile becomes a TRUE screen-fixed floating panel: its content is
    *  portaled out of react-flow's transformed viewport into a fixed full-window
    *  layer, so it holds a constant screen position + size, unaffected by canvas

@@ -17,7 +17,7 @@ import { Wallpaper } from "./Wallpaper";
 import { CanvasOverlay } from "./CanvasOverlay";
 import { ThemeCustomizer } from "./ThemeCustomizer";
 import { applyTheme } from "./theme-store";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, PencilRuler } from "lucide-react";
 import { Toasts, CanvasEmptyState } from "./canvas-overlays";
 import { nodeTypes, PinnedLayerContext, type PinRect } from "./canvas-nodes";
 import { clampAnchor } from "./pin-anchor";
@@ -1039,6 +1039,8 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     // Bare-canvas (no frame): route through the global spawn path. `tree` maps
     // to an editor tile; browser has no spawnVis variant so spawn it directly.
     if (kind === "browser") { spawnInto("browser"); return; }
+    if (kind === "board") { spawnInto("board"); return; }
+    if (kind === "catalog") { spawnInto("catalog"); return; }
     spawnVis(kind === "tree" ? "tree" : (kind as "shell" | "diff" | "issues"));
   }, [frameOpen, spawnVis, spawnInto]);
   const menuSpawnFile = useCallback((frameId: string | null) => {
@@ -1101,6 +1103,69 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     }
     setScratchSave(null);
   }, [scratchSave]);
+
+  // ── board save (unsaved → bound .excalidraw) ──────────────────────────────
+  // Mirrors scratchSave: an unsaved board hands its scene JSON here; we prompt
+  // for a NAME (not a full path — boards live under a fixed `.hivemind/boards/`
+  // dir, versionable with the rest of the tracker), write it, then bind the
+  // tile's `boardFile` so it autosaves from then on.
+  const [boardSave, setBoardSave] = useState<{ tileId: string; sceneJson: string; repoPath: string; draft: string } | null>(null);
+  const saveBoard = useCallback((tileId: string, sceneJson: string) => {
+    const fid = frameOfRef.current[tileId];
+    const f = fid ? framesRef.current.find((x) => x.id === fid) : undefined;
+    const repo = f?.worktreePath ?? f?.workspacePath ?? repoPathRef.current;
+    if (!repo) return;
+    setBoardSave({ tileId, sceneJson, repoPath: repo, draft: `board-${new Date().toISOString().slice(0, 10)}` });
+  }, []);
+  const commitBoardSave = useCallback(async () => {
+    const s = boardSave;
+    if (!s) return;
+    // Sanitize the name → a bare basename under .hivemind/boards/, always with
+    // the `.excalidraw` extension. Strip any path separators the user typed.
+    let base = s.draft.trim().replace(/[/\\]+/g, "-").replace(/^\.+/, "");
+    if (!base) return;
+    if (!/\.excalidraw$/i.test(base)) base += ".excalidraw";
+    const rel = `.hivemind/boards/${base}`;
+    try {
+      await window.hive.fileWrite(s.repoPath, rel, s.sceneJson);
+      // Bind the tile to the saved path → it renders as a bound board (autosaves)
+      // on the next build. Rename its layer label to the file's basename.
+      setTiles((cur) => cur.map((t) => (t.id === s.tileId ? { ...t, boardFile: rel, label: base.replace(/\.excalidraw$/i, "") } : t)));
+    } catch {
+      /* write failed — leave the board unsaved so the scene isn't lost. */
+    }
+    setBoardSave(null);
+  }, [boardSave]);
+
+  // ── open an existing board ────────────────────────────────────────────────
+  // Lists the `.excalidraw` files under `.hivemind/boards/` for the active repo
+  // and spawns a bound board tile on the chosen one. Picker state drives a tiny
+  // modal (same chrome as the scratch/board save prompts).
+  const [openBoard, setOpenBoard] = useState<{ repoPath: string; files: string[] } | null>(null);
+  const openBoardPicker = useCallback(async () => {
+    const selFrame = selectedFrameIdRef.current
+      ?? (selectedTileIdRef.current ? frameOfRef.current[selectedTileIdRef.current] ?? null : null);
+    const f = selFrame ? framesRef.current.find((x) => x.id === selFrame) : undefined;
+    const repo = f?.worktreePath ?? f?.workspacePath ?? repoPathRef.current;
+    if (!repo) return;
+    let files: string[] = [];
+    try {
+      const entries = await window.hive.listDir(repo, ".hivemind/boards");
+      files = entries.filter((e) => /\.excalidraw$/i.test(e)).sort();
+    } catch {
+      files = [];
+    }
+    setOpenBoard({ repoPath: repo, files });
+  }, []);
+
+  // Let any surface (a hotkey, the spawn menu, a future button) request the
+  // open-board picker via a CustomEvent — same decoupled pattern as the other
+  // canvas actions (spawn-claude, add-frame, …).
+  useEffect(() => {
+    const onOpen = () => { void openBoardPicker(); };
+    window.addEventListener("hivemind:open-board", onOpen);
+    return () => window.removeEventListener("hivemind:open-board", onOpen);
+  }, [openBoardPicker]);
 
   // Rail context-menu actions — the SAME surface the on-canvas frame header
   // exposes, reused from the Layers rail (drives a workspace in windows mode,
@@ -1497,7 +1562,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
 
   // Keyboard shortcuts + menu event listeners. See useCanvasShortcuts.
   useCanvasShortcuts({
-    repoPath, spawnClaude, spawnSelectedAgent, spawnVis, spawnBrowser: () => spawnInto("browser"), addFrame, frameOpen, focusTile,
+    repoPath, spawnClaude, spawnSelectedAgent, spawnVis, spawnBrowser: () => spawnInto("browser"), spawnBoard: () => spawnInto("board"), addFrame, frameOpen, focusTile,
     setSelectedTileId, setFocusModeReq, selectedTileIdRef, selectedFrameIdRef,
     focusModeNonceRef, tilesRef,
   });
@@ -1577,11 +1642,11 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     tileNames, agentTitles, frameTiles, framesChipNames,
     updateFrameTitle, updateFrameColor, deleteFrame, arrangeFrame, bringFrameToFront,
     onAttachWorktree, onCreateWorktree, unbindBranch, bindWorkspace, unbindWorkspace,
-    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, saveScratch, onNodeResizeCommit, renameTile, setAgentTitle,
+    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, saveScratch, saveBoard, onNodeResizeCommit, renameTile, setAgentTitle,
     onTogglePin: togglePin, onPinChange,
   }), [
     repoPath, root, cwd, tiles, editorTabs, browserOpenReqs, frames, frameOf, pinnedIds, sizes, positions,
-    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, saveScratch, updateFrameTitle, updateFrameColor,
+    openFileInTile, openUrlInBrowser, openFileFromTerminal, closeTabInTile, closeTile, onSetFolder, saveScratch, saveBoard, updateFrameTitle, updateFrameColor,
     deleteFrame, arrangeFrame, bringFrameToFront, onAttachWorktree, onCreateWorktree,
     unbindBranch, onNodeResizeCommit, frameTiles, tileNames, bindWorkspace,
     // agentTitles intentionally NOT a dep: a live title change must not rebuild
@@ -2014,7 +2079,8 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
               onSpawnAgent={(a) => spawnAgent(a)}
               onFrame={addFrame}
               onBrowser={() => spawnInto("browser")}
-              onTheme={() => setCustomizerOpen((o) => !o)}
+              onBoard={() => spawnInto("board")}
+              onOpenBoard={() => void openBoardPicker()}
               updateAvailable={updateAvailable}
               onUpgrade={() => onUpgrade?.()}
               upgrading={upgrading}
@@ -2062,6 +2128,7 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
                     const id = selectedTileIdRef.current ?? selectedFrameIdRef.current;
                     setFocusModeReq({ id, n: ++focusModeNonceRef.current });
                   }}
+                  onTheme={() => setCustomizerOpen((o) => !o)}
                 />
               )}
             </div>
@@ -2259,7 +2326,73 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
         </div>
       )}
 
-      {/* Confirm before wiping the whole canvas (clear-all / reset layout). */}
+      {/* Name + save an unsaved board → .hivemind/boards/<name>.excalidraw. */}
+      {boardSave && (
+        <div className="fixed inset-0 z-[10000] grid place-items-center" onClick={() => setBoardSave(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative w-[420px] max-w-[92vw] rounded-xl border border-[var(--color-line)] bg-[var(--color-bg2)] shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="text-[13px] font-semibold text-[var(--color-fg)]">Save board</div>
+            <div className="mt-1 text-[11px] text-[var(--color-fg2)]">Saved under <span className="font-mono">.hivemind/boards/</span> — <span className="font-mono">.excalidraw</span> added automatically.</div>
+            <input
+              autoFocus
+              value={boardSave.draft}
+              onChange={(e) => setBoardSave((s) => (s ? { ...s, draft: e.target.value } : s))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); commitBoardSave(); }
+                else if (e.key === "Escape") { e.preventDefault(); setBoardSave(null); }
+              }}
+              placeholder="sketch"
+              spellCheck={false}
+              className="mt-3 w-full bg-[var(--color-bg)] border border-[var(--color-line2)] focus:border-[var(--color-brand)] rounded px-2.5 py-1.5 text-[13px] font-mono text-[var(--color-fg)] outline-none"
+              aria-label="board name"
+            />
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setBoardSave(null)}
+                className="px-2.5 py-1.5 rounded-md text-[12px] text-[var(--color-fg2)] hover:bg-[var(--color-bg3)] hover:text-[var(--color-fg)]"
+              >Cancel</button>
+              <button
+                onClick={() => commitBoardSave()}
+                disabled={!boardSave.draft.trim()}
+                className="px-2.5 py-1.5 rounded-md text-[12px] font-medium text-white bg-[var(--color-brand)] hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
+              >Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Open an existing board — pick from .hivemind/boards/*.excalidraw. */}
+      {openBoard && (
+        <div className="fixed inset-0 z-[10000] grid place-items-center" onClick={() => setOpenBoard(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative w-[440px] max-w-[92vw] rounded-xl border border-[var(--color-line)] bg-[var(--color-bg2)] shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="text-[13px] font-semibold text-[var(--color-fg)]">Open board</div>
+            <div className="mt-1 text-[11px] text-[var(--color-fg2)]">Boards saved under <span className="font-mono">.hivemind/boards/</span>.</div>
+            {openBoard.files.length === 0 ? (
+              <div className="mt-4 text-[12px] text-[var(--color-fg3)] text-center py-6">No saved boards yet. Create one with the Board tool (8), draw, then Save…</div>
+            ) : (
+              <div className="mt-3 max-h-[50vh] overflow-auto flex flex-col gap-0.5">
+                {openBoard.files.map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => { spawnInto("board", { boardFile: `.hivemind/boards/${f}` }); setOpenBoard(null); }}
+                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[12px] text-left text-[var(--color-fg2)] hover:bg-[var(--color-bg3)] hover:text-[var(--color-fg)]"
+                  >
+                    <PencilRuler size={13} className="text-[var(--color-fg3)] shrink-0" />
+                    <span className="font-mono truncate">{f.replace(/\.excalidraw$/i, "")}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setOpenBoard(null)}
+                className="px-2.5 py-1.5 rounded-md text-[12px] text-[var(--color-fg2)] hover:bg-[var(--color-bg3)] hover:text-[var(--color-fg)]"
+              >Close</button>
+            </div>
+          </div>
+        </div>
+      )}
       <ConfirmDialog
         open={confirmClear}
         onOpenChange={setConfirmClear}

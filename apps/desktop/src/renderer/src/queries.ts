@@ -616,3 +616,83 @@ export function useFsChangedInvalidation(
     };
   }, [repoPath, root, qc]);
 }
+
+// ── agent catalog (resources: agents / skills / mcps) ─────────────────────
+
+import type {
+  CatalogResource,
+  CatalogResourceKind,
+  CatalogCli,
+  CatalogSummonView,
+} from "../../shared/ipc";
+
+/** The machine-global catalog of resources (agents/skills/mcps). */
+export function useCatalog() {
+  return useQuery<CatalogResource[]>({
+    queryKey: ["catalog"],
+    queryFn: () => window.hive.catalogList(),
+  });
+}
+
+/** What's summoned (global) vs local (repo-authored) in a workspace. */
+export function useSummonList(workspaceRoot: string | null | undefined) {
+  return useQuery<CatalogSummonView>({
+    queryKey: ["catalog-summons", workspaceRoot],
+    queryFn: () =>
+      workspaceRoot
+        ? window.hive.catalogSummonList(workspaceRoot)
+        : Promise.resolve({ summoned: [], local: [] }),
+    enabled: !!workspaceRoot,
+  });
+}
+
+export function useCreateResource() {
+  const qc = useQueryClient();
+  return useMutation<
+    CatalogResource,
+    Error,
+    { kind: CatalogResourceKind; name: string; title?: string; tags?: string[] }
+  >({
+    mutationFn: (opts) => window.hive.catalogNew(opts),
+    onError: (e) => toast.error("create resource failed", { description: e.message }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["catalog"] }),
+  });
+}
+
+export function useRemoveResource() {
+  const qc = useQueryClient();
+  return useMutation<{ ok: true }, Error, { kind: CatalogResourceKind; name: string }>({
+    mutationFn: ({ kind, name }) => window.hive.catalogRemove(kind, name),
+    onError: (e) => toast.error("remove resource failed", { description: e.message }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["catalog"] }),
+  });
+}
+
+export function useSummon() {
+  const qc = useQueryClient();
+  return useMutation<
+    Awaited<ReturnType<typeof window.hive.catalogSummon>>,
+    Error,
+    { kind: CatalogResourceKind; name: string; workspaceRoot: string; cli?: CatalogCli; scope?: "project" | "global"; copy?: boolean }
+  >({
+    mutationFn: (opts) => window.hive.catalogSummon(opts),
+    onError: (e) => toast.error("summon failed", { description: e.message }),
+    onSuccess: (res, _vars) => {
+      toast.success(`summoned ${res.kind}/${res.resource} → ${res.cli} (${res.scope})`);
+      qc.invalidateQueries({ queryKey: ["catalog-summons"] });
+    },
+  });
+}
+
+export function useUnsummon() {
+  const qc = useQueryClient();
+  return useMutation<
+    { removed: boolean },
+    Error,
+    { name: string; workspaceRoot: string; cli?: CatalogCli; scope?: "project" | "global" }
+  >({
+    mutationFn: (opts) => window.hive.catalogUnsummon(opts),
+    onError: (e) => toast.error("unsummon failed", { description: e.message }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["catalog-summons"] }),
+  });
+}
