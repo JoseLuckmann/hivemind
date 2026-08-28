@@ -7,6 +7,8 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+## [1.19.2] — 2026-08-27
+
 ### Changed
 
 - **Catalog is now an IDE-style rail + editor.** The agent catalog moved into the left rail as a
@@ -1143,7 +1145,8 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 - **install.sh** — single script for both fresh install and in-place upgrade. Downloads prebuilt binaries from GitHub Releases by default; `--dev` flag clones and builds from source.
 - **GitHub Actions** — `release.yml` (tag-driven build + publish on `v*.*.*`), `ci.yml` (typecheck + build + unit tests on every push / PR).
 
-[Unreleased]: https://github.com/dip497/hivemind/compare/v1.19.1...HEAD
+[Unreleased]: https://github.com/dip497/hivemind/compare/v1.19.2...HEAD
+[1.19.2]: https://github.com/dip497/hivemind/releases/tag/v1.19.2
 [1.19.1]: https://github.com/dip497/hivemind/releases/tag/v1.19.1
 [1.19.0]: https://github.com/dip497/hivemind/releases/tag/v1.19.0
 [1.18.0-flow.1]: https://github.com/dip497/hivemind/releases/tag/v1.18.0-flow.1
