@@ -1,27 +1,28 @@
 /**
- * CatalogPanel — the personal agent marketplace, as an APPLICATION panel (not a
- * canvas tile). It's a full-screen overlay opened by a button, like Settings.
+ * Agent Catalog — the personal agent marketplace, as an APPLICATION surface
+ * (not a canvas tile). It has two parts that mirror an IDE:
  *
- * The journey it serves:
- *   - Click a button → see every agent / skill / mcp you've authored.
- *   - Create a new agent / skill / mcp; edit an existing one (opens its
- *     canonical file in your OS editor — edits propagate to every summon).
- *   - Associate skills (and mcps) with an agent — a checkbox matrix that writes
- *     the agent's manifest.
- *   - Spawn an agent (claude / codex / …) into a workspace WITH its associated
- *     resources applied (summon-bundle → then launch the CLI).
+ *   - CatalogSidebar: the LEFT RAIL (same slot as LayersPanel — you toggle
+ *     between "Layers" and "Catalog" there). Lists agents / skills / mcps as
+ *     rows grouped by kind, with per-row CRUD, "associate skills/mcps to an
+ *     agent", and "spawn this agent into a workspace".
+ *   - CatalogEditor: fills the MAIN region (where the canvas is) and edits the
+ *     selected resource's canonical file using the app's own EditorTile — the
+ *     resource's dir is the editor's repoPath so the repo-relative editor
+ *     reads/writes it unchanged; edits propagate to every summon (symlink).
  *
- * The catalog lives once in ~/.config/hivemind/catalog/; this panel is the CRUD
- * surface over it. Data flows through the TanStack hooks in queries.ts.
+ * The catalog lives once in ~/.config/hivemind/catalog/. Data flows through the
+ * TanStack hooks in queries.ts.
  */
 import { useMemo, useState } from "react";
-import { X, Bot, Sparkles, Plug, Plus, Pencil, Trash2, Rocket, Link2 } from "lucide-react";
+import { Bot, Sparkles, Plug, Plus, Pencil, Trash2, Rocket, Link2, X } from "lucide-react";
 import {
   useCatalog,
   useCreateResource,
   useRemoveResource,
   useSetAssociations,
 } from "./queries";
+import { EditorTile } from "./EditorTile";
 import type { CatalogResource, CatalogResourceKind, CatalogCli } from "../../shared/ipc";
 
 /** A workspace an agent can be spawned into (a frame bound to a repo). */
@@ -31,24 +32,44 @@ export interface SpawnTarget {
   repoPath: string;
 }
 
-interface Props {
-  open: boolean;
-  onClose: () => void;
-  /** Frames the user can spawn an agent into. */
-  targets: SpawnTarget[];
-  /** Spawn a catalog agent into a frame's workspace with its resources applied.
-   *  App wires this to: summon-bundle → launch the CLI in that frame. */
-  onSpawn: (opts: { agentName: string; cli: CatalogCli; repoPath: string }) => void;
+/** A resource selected for editing — its dir + canonical file basename. */
+export interface CatalogSelection {
+  name: string;
+  kind: CatalogResourceKind;
+  repoPath: string;
+  file: string;
+  label: string;
 }
 
 const KIND_META: Record<CatalogResourceKind, { icon: React.ReactNode; label: string }> = {
-  agent: { icon: <Bot size={15} />, label: "Agents" },
-  skill: { icon: <Sparkles size={15} />, label: "Skills" },
-  mcp: { icon: <Plug size={15} />, label: "MCPs" },
+  agent: { icon: <Bot size={14} />, label: "Agents" },
+  skill: { icon: <Sparkles size={14} />, label: "Skills" },
+  mcp: { icon: <Plug size={14} />, label: "MCPs" },
 };
+const KIND_ORDER: CatalogResourceKind[] = ["agent", "skill", "mcp"];
 const CLIS: CatalogCli[] = ["claude", "codex", "kiro"];
 
-export function CatalogPanel({ open, onClose, targets, onSpawn }: Props) {
+/** The canonical file (repo-relative to the resource dir) for a resource. */
+function selectionFor(r: CatalogResource): CatalogSelection {
+  const file = r.canonicalFile ? r.canonicalFile.slice(r.dir.length + 1) : "resource.yaml";
+  return { name: r.name, kind: r.kind, repoPath: r.dir, file, label: `${r.kind}/${r.name}` };
+}
+
+// ── sidebar (left rail) ─────────────────────────────────────────────────────
+
+export function CatalogSidebar({
+  width,
+  selected,
+  onSelect,
+  targets,
+  onSpawn,
+}: {
+  width: number;
+  selected: string | null;
+  onSelect: (sel: CatalogSelection) => void;
+  targets: SpawnTarget[];
+  onSpawn: (opts: { agentName: string; cli: CatalogCli; repoPath: string }) => void;
+}) {
   const catalog = useCatalog();
   const create = useCreateResource();
   const remove = useRemoveResource();
@@ -58,120 +79,132 @@ export function CatalogPanel({ open, onClose, targets, onSpawn }: Props) {
   const [assocFor, setAssocFor] = useState<string | null>(null);
   const [spawnFor, setSpawnFor] = useState<CatalogResource | null>(null);
 
-  const { agents, skills, mcps } = useMemo(() => {
-    const a: CatalogResource[] = [], s: CatalogResource[] = [], m: CatalogResource[] = [];
-    for (const r of catalog.data ?? []) {
-      if (r.kind === "agent") a.push(r);
-      else if (r.kind === "skill") s.push(r);
-      else m.push(r);
-    }
-    return { agents: a, skills: s, mcps: m };
+  const grouped = useMemo(() => {
+    const by: Record<CatalogResourceKind, CatalogResource[]> = { agent: [], skill: [], mcp: [] };
+    for (const r of catalog.data ?? []) by[r.kind].push(r);
+    return by;
   }, [catalog.data]);
 
-  if (!open) return null;
-
-  async function edit(r: CatalogResource) {
-    await window.hive.catalogOpen(r.kind, r.name);
-  }
+  const skills = grouped.skill;
+  const mcps = grouped.mcp;
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-[var(--color-bg)]">
-      {/* header */}
-      <header className="flex items-center gap-3 px-5 h-14 border-b border-[var(--color-line)] shrink-0">
-        <Bot size={18} className="text-[var(--color-brand)]" />
-        <div className="flex flex-col">
-          <h1 className="text-[15px] font-semibold text-[var(--color-fg)] leading-none">Agent Catalog</h1>
-          <span className="text-[11px] text-[var(--color-fg3)] mt-0.5">
-            Your reusable agents, skills & MCPs — authored once, summoned anywhere.
-          </span>
-        </div>
-        <div className="flex-1" />
-        <button
-          onClick={onClose}
-          aria-label="Close catalog"
-          className="grid place-items-center size-8 rounded-lg text-[var(--color-fg2)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)] cursor-pointer transition-colors"
-        >
-          <X size={18} />
-        </button>
-      </header>
+    <aside
+      className="shrink-0 flex flex-col min-h-0 border-r border-[var(--color-line)] bg-[var(--color-bg2)] overflow-hidden"
+      style={{ width }}
+    >
+      <div className="flex-1 overflow-auto py-1">
+        {KIND_ORDER.map((kind) => {
+          const items = grouped[kind];
+          const meta = KIND_META[kind];
+          return (
+            <section key={kind} className="mb-1">
+              <header className="flex items-center gap-1.5 px-3 h-8 text-[var(--color-fg3)] sticky top-0 bg-[var(--color-bg2)]">
+                {meta.icon}
+                <span className="u-eyebrow text-[10.5px]">{meta.label}</span>
+                <span className="text-[10.5px] tabular-nums">{items.length}</span>
+                <div className="flex-1" />
+                <button
+                  onClick={() => setCreating(kind)}
+                  aria-label={`New ${kind}`}
+                  title={`New ${kind}`}
+                  className="grid place-items-center size-5 rounded text-[var(--color-fg3)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)] cursor-pointer"
+                >
+                  <Plus size={13} />
+                </button>
+              </header>
 
-      {/* body: three columns */}
-      <div className="flex-1 min-h-0 grid grid-cols-3 divide-x divide-[var(--color-line2)] overflow-hidden">
-        <Column
-          kind="agent"
-          items={agents}
-          creating={creating === "agent"}
-          onStartCreate={() => setCreating("agent")}
-          onCancelCreate={() => setCreating(null)}
-          createBusy={create.isPending}
-          onCreate={(name) => create.mutate({ kind: "agent", name }, { onSuccess: () => setCreating(null) })}
-          onEdit={edit}
-          onRemove={(r) => confirm(`Remove agent/${r.name}?`) && remove.mutate({ kind: r.kind, name: r.name })}
-          renderExtra={(r) => (
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setAssocFor(assocFor === r.name ? null : r.name)}
-                title="Associate skills / mcps"
-                aria-label={`Associate resources with ${r.name}`}
-                className="grid place-items-center size-6 rounded text-[var(--color-fg3)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)] cursor-pointer"
-              >
-                <Link2 size={13} />
-              </button>
-              <button
-                onClick={() => setSpawnFor(r)}
-                title="Spawn this agent into a workspace"
-                aria-label={`Spawn ${r.name}`}
-                disabled={targets.length === 0}
-                className="grid place-items-center size-6 rounded text-[var(--color-brand)] hover:bg-[var(--color-bg3)] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Rocket size={13} />
-              </button>
-            </div>
-          )}
-          renderBelow={(r) =>
-            assocFor === r.name ? (
-              <AssociationEditor
-                agent={r}
-                skills={skills}
-                mcps={mcps}
-                busy={setAssoc.isPending}
-                onSave={(sel) =>
-                  setAssoc.mutate(
-                    { name: r.name, skills: sel.skills, mcps: sel.mcps },
-                    { onSuccess: () => setAssocFor(null) },
-                  )
-                }
-                onClose={() => setAssocFor(null)}
-              />
-            ) : r.skills.length > 0 || r.mcps.length > 0 ? (
-              <div className="px-2 pb-1.5 text-[10px] text-[var(--color-fg3)]">
-                {[...r.skills.map((s) => `skill:${s}`), ...r.mcps.map((m) => `mcp:${m}`)].join("  ·  ")}
-              </div>
-            ) : null
-          }
-        />
-        <Column
-          kind="skill"
-          items={skills}
-          creating={creating === "skill"}
-          onStartCreate={() => setCreating("skill")}
-          onCancelCreate={() => setCreating(null)}
-          createBusy={create.isPending}
-          onCreate={(name) => create.mutate({ kind: "skill", name }, { onSuccess: () => setCreating(null) })}
-          onEdit={edit}
-          onRemove={(r) => confirm(`Remove skill/${r.name}?`) && remove.mutate({ kind: r.kind, name: r.name })}
-        />
-        <Column
-          kind="mcp"
-          items={mcps}
-          creating={creating === "mcp"}
-          onStartCreate={() => setCreating("mcp")}
-          onCancelCreate={() => setCreating(null)}
-          createBusy={create.isPending}
-          onCreate={(name) => create.mutate({ kind: "mcp", name }, { onSuccess: () => setCreating(null) })}
-          onEdit={edit}
-          onRemove={(r) => confirm(`Remove mcp/${r.name}?`) && remove.mutate({ kind: r.kind, name: r.name })}
-        />
+              {creating === kind && (
+                <NewRow
+                  kind={kind}
+                  busy={create.isPending}
+                  onCancel={() => setCreating(null)}
+                  onCreate={(name) =>
+                    create.mutate({ kind, name }, { onSuccess: () => setCreating(null) })
+                  }
+                />
+              )}
+
+              {items.length === 0 && creating !== kind && (
+                <p className="px-3 py-1 text-[11px] text-[var(--color-fg3)]">none yet</p>
+              )}
+
+              {items.map((r) => {
+                const sel = selectionFor(r);
+                const active = selected === `${r.kind}/${r.name}`;
+                return (
+                  <div key={r.name}>
+                    <div
+                      className={`group flex items-center gap-1.5 pl-3 pr-2 py-1 cursor-pointer ${
+                        active ? "bg-[var(--color-bg3)]" : "hover:bg-[var(--color-bg2)]"
+                      }`}
+                      onClick={() => onSelect(sel)}
+                    >
+                      <span className="flex-1 min-w-0 truncate text-[12px] text-[var(--color-fg)]" title={r.title}>
+                        {r.name}
+                      </span>
+                      {r.kind === "agent" && (
+                        <>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setAssocFor(assocFor === r.name ? null : r.name); }}
+                            title="Associate skills / mcps"
+                            aria-label={`Associate resources with ${r.name}`}
+                            className="grid place-items-center size-5 rounded text-[var(--color-fg3)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)] cursor-pointer opacity-0 group-hover:opacity-100"
+                          >
+                            <Link2 size={12} />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setSpawnFor(r); }}
+                            title="Spawn this agent into a workspace"
+                            aria-label={`Spawn ${r.name}`}
+                            disabled={targets.length === 0}
+                            className="grid place-items-center size-5 rounded text-[var(--color-brand)] hover:bg-[var(--color-bg3)] cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed opacity-0 group-hover:opacity-100"
+                          >
+                            <Rocket size={12} />
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onSelect(sel); }}
+                        title="Edit"
+                        aria-label={`Edit ${r.name}`}
+                        className="grid place-items-center size-5 rounded text-[var(--color-fg3)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)] cursor-pointer opacity-0 group-hover:opacity-100"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Remove ${r.kind}/${r.name}?`)) remove.mutate({ kind: r.kind, name: r.name });
+                        }}
+                        title="Remove"
+                        aria-label={`Remove ${r.name}`}
+                        className="grid place-items-center size-5 rounded text-[var(--color-fg3)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg3)] cursor-pointer opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                    {r.kind === "agent" && assocFor === r.name && (
+                      <AssociationEditor
+                        agent={r}
+                        skills={skills}
+                        mcps={mcps}
+                        busy={setAssoc.isPending}
+                        onSave={(a) => setAssoc.mutate({ name: r.name, skills: a.skills, mcps: a.mcps }, { onSuccess: () => setAssocFor(null) })}
+                        onClose={() => setAssocFor(null)}
+                      />
+                    )}
+                    {r.kind === "agent" && assocFor !== r.name && (r.skills.length > 0 || r.mcps.length > 0) && (
+                      <div className="pl-3 pr-2 pb-1 text-[9.5px] text-[var(--color-fg3)] truncate">
+                        {[...r.skills.map((s) => `+${s}`), ...r.mcps.map((m) => `@${m}`)].join(" ")}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </section>
+          );
+        })}
       </div>
 
       {spawnFor && (
@@ -182,98 +215,67 @@ export function CatalogPanel({ open, onClose, targets, onSpawn }: Props) {
           onSpawn={(cli, repoPath) => {
             onSpawn({ agentName: spawnFor.name, cli, repoPath });
             setSpawnFor(null);
-            onClose();
           }}
         />
       )}
+    </aside>
+  );
+}
+
+// ── editor (main region) ────────────────────────────────────────────────────
+
+export function CatalogEditor({ selection, onClose }: { selection: CatalogSelection | null; onClose: () => void }) {
+  if (!selection) {
+    return (
+      <div className="flex-1 grid place-items-center bg-[var(--color-bg)] text-center px-8">
+        <div className="max-w-[320px]">
+          <Bot size={28} className="mx-auto text-[var(--color-fg3)] mb-3" />
+          <p className="text-[13px] font-medium text-[var(--color-fg)]">Agent Catalog</p>
+          <p className="text-[11.5px] text-[var(--color-fg2)] mt-1.5 leading-relaxed">
+            Pick an agent, skill, or MCP on the left to edit it here. Create new ones with the
+            <Plus size={11} className="inline mx-0.5 -mt-0.5" /> in each section. Associate skills with an
+            agent, then spawn it into a workspace with its resources applied.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex-1 flex flex-col min-h-0 bg-[var(--color-bg)]">
+      <div className="flex items-center gap-2 px-4 h-10 border-b border-[var(--color-line2)] shrink-0 text-[12px] text-[var(--color-fg2)]">
+        <Pencil size={13} className="text-[var(--color-fg3)]" />
+        <span className="font-medium text-[var(--color-fg)]">{selection.label}</span>
+        <div className="flex-1" />
+        <button
+          onClick={onClose}
+          aria-label="Close editor"
+          className="grid place-items-center size-6 rounded text-[var(--color-fg3)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)] cursor-pointer"
+        >
+          <X size={15} />
+        </button>
+      </div>
+      <div className="flex-1 min-h-0">
+        <EditorTile
+          key={`${selection.repoPath}:${selection.file}`}
+          repoPath={selection.repoPath}
+          tabs={[selection.file]}
+          onCloseTab={() => {}}
+          embedded
+          singleFile
+        />
+      </div>
     </div>
   );
 }
 
-/** One kind's column: header + create + list. */
-function Column({
-  kind, items, creating, onStartCreate, onCancelCreate, createBusy, onCreate,
-  onEdit, onRemove, renderExtra, renderBelow,
-}: {
-  kind: CatalogResourceKind;
-  items: CatalogResource[];
-  creating: boolean;
-  onStartCreate: () => void;
-  onCancelCreate: () => void;
-  createBusy: boolean;
-  onCreate: (name: string) => void;
-  onEdit: (r: CatalogResource) => void;
-  onRemove: (r: CatalogResource) => void;
-  renderExtra?: (r: CatalogResource) => React.ReactNode;
-  renderBelow?: (r: CatalogResource) => React.ReactNode;
-}) {
-  const meta = KIND_META[kind];
-  return (
-    <section className="flex flex-col min-h-0 overflow-hidden">
-      <header className="flex items-center gap-2 px-4 h-11 border-b border-[var(--color-line2)] shrink-0 text-[var(--color-fg2)]">
-        {meta.icon}
-        <span className="text-[12.5px] font-medium text-[var(--color-fg)]">{meta.label}</span>
-        <span className="text-[11px] text-[var(--color-fg3)] tabular-nums">{items.length}</span>
-        <div className="flex-1" />
-        <button
-          onClick={onStartCreate}
-          aria-label={`New ${kind}`}
-          className="grid place-items-center size-6 rounded text-[var(--color-fg3)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)] cursor-pointer"
-        >
-          <Plus size={15} />
-        </button>
-      </header>
-      <div className="flex-1 overflow-auto p-2">
-        {creating && (
-          <NewRow kind={kind} busy={createBusy} onCreate={onCreate} onCancel={onCancelCreate} />
-        )}
-        {items.length === 0 && !creating && (
-          <p className="px-2 py-3 text-[11.5px] text-[var(--color-fg3)] leading-relaxed">
-            No {kind}s yet. Click <Plus size={11} className="inline -mt-0.5" /> to create one.
-          </p>
-        )}
-        {items.map((r) => (
-          <div key={r.name} className="rounded-md hover:bg-[var(--color-bg2)]">
-            <div className="group flex items-center gap-2 px-2 py-1.5">
-              <span className="flex-1 min-w-0 truncate text-[12.5px] text-[var(--color-fg)]" title={r.title}>
-                {r.name}
-                {r.tags.length > 0 && (
-                  <span className="ml-1.5 text-[10px] text-[var(--color-fg3)]">{r.tags.join(", ")}</span>
-                )}
-              </span>
-              {renderExtra?.(r)}
-              <button
-                onClick={() => onEdit(r)}
-                aria-label={`Edit ${r.name}`}
-                title="Edit canonical file"
-                className="grid place-items-center size-6 rounded text-[var(--color-fg3)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg3)] cursor-pointer opacity-0 group-hover:opacity-100"
-              >
-                <Pencil size={13} />
-              </button>
-              <button
-                onClick={() => onRemove(r)}
-                aria-label={`Remove ${r.name}`}
-                title="Remove from catalog"
-                className="grid place-items-center size-6 rounded text-[var(--color-fg3)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg3)] cursor-pointer opacity-0 group-hover:opacity-100"
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-            {renderBelow?.(r)}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
+// ── shared subcomponents ────────────────────────────────────────────────────
 
-/** Inline name input for creating a resource. */
 function NewRow({ kind, busy, onCreate, onCancel }: {
   kind: CatalogResourceKind; busy: boolean; onCreate: (n: string) => void; onCancel: () => void;
 }) {
   const [name, setName] = useState("");
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1.5 mb-1">
+    <div className="flex items-center gap-1 px-3 py-1">
       <input
         autoFocus
         value={name}
@@ -282,25 +284,24 @@ function NewRow({ kind, busy, onCreate, onCancel }: {
           if (e.key === "Enter" && name.trim()) onCreate(name.trim());
           if (e.key === "Escape") onCancel();
         }}
-        placeholder={`new-${kind}-name`}
+        placeholder={`new-${kind}`}
         aria-label={`New ${kind} name`}
-        className="flex-1 bg-[var(--color-bg3)] border border-[var(--color-line2)] rounded-md text-[11.5px] text-[var(--color-fg)] px-2 py-1 outline-none focus:border-[var(--color-brand)]"
+        className="flex-1 min-w-0 bg-[var(--color-bg3)] border border-[var(--color-line2)] rounded text-[11px] text-[var(--color-fg)] px-1.5 py-1 outline-none focus:border-[var(--color-brand)]"
       />
       <button
         onClick={() => name.trim() && onCreate(name.trim())}
         disabled={busy || !name.trim()}
-        className="text-[11px] px-2 py-1 rounded-md text-white bg-[var(--color-brand)] hover:opacity-90 cursor-pointer disabled:opacity-40"
+        className="text-[10.5px] px-1.5 py-1 rounded text-white bg-[var(--color-brand)] hover:opacity-90 cursor-pointer disabled:opacity-40"
       >
-        Create
+        Add
       </button>
-      <button onClick={onCancel} className="text-[11px] px-1.5 py-1 rounded-md text-[var(--color-fg2)] hover:bg-[var(--color-bg3)] cursor-pointer">
-        Cancel
+      <button onClick={onCancel} aria-label="Cancel" className="grid place-items-center size-6 rounded text-[var(--color-fg3)] hover:bg-[var(--color-bg3)] cursor-pointer">
+        <X size={13} />
       </button>
     </div>
   );
 }
 
-/** Checkbox matrix to associate skills + mcps with an agent. */
 function AssociationEditor({ agent, skills, mcps, busy, onSave, onClose }: {
   agent: CatalogResource;
   skills: CatalogResource[];
@@ -317,19 +318,19 @@ function AssociationEditor({ agent, skills, mcps, busy, onSave, onClose }: {
     return next;
   };
   return (
-    <div className="mx-2 mb-2 p-2 rounded-md border border-[var(--color-line2)] bg-[var(--color-bg3)]">
-      <p className="text-[10.5px] text-[var(--color-fg3)] mb-1.5">Skills for {agent.name}</p>
-      {skills.length === 0 && <p className="text-[10.5px] text-[var(--color-fg3)]">no skills yet</p>}
+    <div className="mx-2 my-1 p-2 rounded-md border border-[var(--color-line2)] bg-[var(--color-bg3)]">
+      <p className="text-[10px] text-[var(--color-fg3)] mb-1">Skills</p>
+      {skills.length === 0 && <p className="text-[10px] text-[var(--color-fg3)]">none</p>}
       {skills.map((s) => (
-        <label key={s.name} className="flex items-center gap-1.5 text-[11.5px] text-[var(--color-fg)] py-0.5 cursor-pointer">
+        <label key={s.name} className="flex items-center gap-1.5 text-[11px] text-[var(--color-fg)] py-0.5 cursor-pointer">
           <input type="checkbox" checked={selSkills.has(s.name)} onChange={() => setSelSkills((p) => toggle(p, s.name))} />
           {s.name}
         </label>
       ))}
-      <p className="text-[10.5px] text-[var(--color-fg3)] mt-2 mb-1.5">MCPs for {agent.name}</p>
-      {mcps.length === 0 && <p className="text-[10.5px] text-[var(--color-fg3)]">no mcps yet</p>}
+      <p className="text-[10px] text-[var(--color-fg3)] mt-1.5 mb-1">MCPs</p>
+      {mcps.length === 0 && <p className="text-[10px] text-[var(--color-fg3)]">none</p>}
       {mcps.map((m) => (
-        <label key={m.name} className="flex items-center gap-1.5 text-[11.5px] text-[var(--color-fg)] py-0.5 cursor-pointer">
+        <label key={m.name} className="flex items-center gap-1.5 text-[11px] text-[var(--color-fg)] py-0.5 cursor-pointer">
           <input type="checkbox" checked={selMcps.has(m.name)} onChange={() => setSelMcps((p) => toggle(p, m.name))} />
           {m.name}
         </label>
@@ -338,11 +339,11 @@ function AssociationEditor({ agent, skills, mcps, busy, onSave, onClose }: {
         <button
           onClick={() => onSave({ skills: [...selSkills], mcps: [...selMcps] })}
           disabled={busy}
-          className="text-[11px] px-2 py-1 rounded-md text-white bg-[var(--color-brand)] hover:opacity-90 cursor-pointer disabled:opacity-40"
+          className="text-[10.5px] px-2 py-1 rounded text-white bg-[var(--color-brand)] hover:opacity-90 cursor-pointer disabled:opacity-40"
         >
           Save
         </button>
-        <button onClick={onClose} className="text-[11px] px-1.5 py-1 rounded-md text-[var(--color-fg2)] hover:bg-[var(--color-bg3)] cursor-pointer">
+        <button onClick={onClose} className="text-[10.5px] px-1.5 py-1 rounded text-[var(--color-fg2)] hover:bg-[var(--color-bg2)] cursor-pointer">
           Cancel
         </button>
       </div>
@@ -350,7 +351,6 @@ function AssociationEditor({ agent, skills, mcps, busy, onSave, onClose }: {
   );
 }
 
-/** Pick a CLI + target workspace, then spawn the agent (with its resources). */
 function SpawnDialog({ agent, targets, onClose, onSpawn }: {
   agent: CatalogResource;
   targets: SpawnTarget[];

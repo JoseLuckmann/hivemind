@@ -7,6 +7,15 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
 
 ## [Unreleased]
 
+### Changed
+
+- **Catalog is now an IDE-style rail + editor.** The agent catalog moved into the left rail as a
+  **Layers ↔ Catalog** tab toggle (both are left-rail surfaces, so you switch between them in the same
+  slot). In Catalog mode the rail lists agents / skills / MCPs as stacked sections, and the main region
+  becomes the app's **built-in file editor** (CodeMirror) for the selected resource — no more opening
+  the OS editor. Create / associate / spawn all live in the rail; editing a resource's canonical file
+  propagates to every summon.
+
 ## [1.19.1] — 2026-08-27
 
 ### Changed

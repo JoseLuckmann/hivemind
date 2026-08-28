@@ -18,7 +18,7 @@ import { CanvasOverlay } from "./CanvasOverlay";
 import { ThemeCustomizer } from "./ThemeCustomizer";
 import { applyTheme } from "./theme-store";
 import { Eye, EyeOff, PencilRuler, Boxes } from "lucide-react";
-import { CatalogPanel, type SpawnTarget } from "./CatalogPanel";
+import { CatalogSidebar, CatalogEditor, type SpawnTarget, type CatalogSelection } from "./CatalogPanel";
 import { toast } from "sonner";
 import { Toasts, CanvasEmptyState } from "./canvas-overlays";
 import { nodeTypes, PinnedLayerContext, type PinRect } from "./canvas-nodes";
@@ -967,11 +967,12 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
     setSelectedFrameId, setTiles, setSpawnPick, focusTile,
   });
 
-  // ── Agent Catalog panel (application-level surface, NOT a canvas tile) ──────
-  // Opened by a button / ⌘⇧A. Lists the machine-global catalog of resources
-  // (agents/skills/mcps) and can spawn an agent into a frame WITH its associated
-  // skills/mcps applied (summon-bundle → launch the CLI).
-  const [catalogOpen, setCatalogOpen] = useState(false);
+  // ── Agent Catalog (application-level surface, NOT a canvas tile) ────────────
+  // The left rail toggles between "Layers" and "Catalog". In catalog mode, the
+  // rail shows the resource list (CatalogSidebar) and the main region shows the
+  // in-app editor (CatalogEditor) for the selected resource — an IDE layout.
+  const [railMode, setRailMode] = useState<"layers" | "catalog">("layers");
+  const [catalogSel, setCatalogSel] = useState<CatalogSelection | null>(null);
 
   // Frames the catalog can spawn into: those bound to a repo/worktree, de-duped.
   const catalogTargets: SpawnTarget[] = useMemo(() => {
@@ -1979,18 +1980,53 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
         />
       ) : (
       <div className="flex-1 min-h-0 flex flex-row">
-        {!zen && layerTiles.length > 0 && (
-          <LayersPanel
-            frames={layerFrames}
-            tiles={layerTiles}
-            selectedTileId={selectedTileId}
-            onFocusTile={focusTileFromPanel}
-            onFocusFrame={focusFrameFromPanel}
-            frameActions={frameActions}
-            onReorderTiles={onReorderTilesFromPanel}
-            onReorderFrames={onReorderFramesFromPanel}
-            onReparentTile={onReparentTileFromPanel}
-          />
+        {!zen && (railMode === "catalog" || layerTiles.length > 0) && (
+          <div className="shrink-0 flex flex-col min-h-0 bg-[var(--color-bg2)]">
+            {/* Rail switch: Layers ↔ Catalog (both are left-rail surfaces). */}
+            <div className="flex items-center gap-1 p-1.5 border-b border-r border-[var(--color-line2)]">
+              <button
+                onClick={() => setRailMode("layers")}
+                className={`flex-1 text-[11px] font-medium px-2 py-1 rounded-md cursor-pointer transition-colors ${
+                  railMode === "layers" ? "bg-[var(--color-bg3)] text-[var(--color-fg)]" : "text-[var(--color-fg3)] hover:text-[var(--color-fg2)]"
+                }`}
+                aria-pressed={railMode === "layers"}
+              >
+                Layers
+              </button>
+              <button
+                onClick={() => setRailMode("catalog")}
+                className={`flex-1 inline-flex items-center justify-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md cursor-pointer transition-colors ${
+                  railMode === "catalog" ? "bg-[var(--color-brand)] text-white" : "text-[var(--color-fg3)] hover:text-[var(--color-fg2)]"
+                }`}
+                aria-pressed={railMode === "catalog"}
+              >
+                <Boxes size={12} /> Catalog
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 flex flex-row">
+              {railMode === "catalog" ? (
+                <CatalogSidebar
+                  width={260}
+                  selected={catalogSel ? catalogSel.label : null}
+                  onSelect={setCatalogSel}
+                  targets={catalogTargets}
+                  onSpawn={(o) => void spawnCatalogAgent(o)}
+                />
+              ) : (
+                <LayersPanel
+                  frames={layerFrames}
+                  tiles={layerTiles}
+                  selectedTileId={selectedTileId}
+                  onFocusTile={focusTileFromPanel}
+                  onFocusFrame={focusFrameFromPanel}
+                  frameActions={frameActions}
+                  onReorderTiles={onReorderTilesFromPanel}
+                  onReorderFrames={onReorderFramesFromPanel}
+                  onReparentTile={onReparentTileFromPanel}
+                />
+              )}
+            </div>
+          </div>
         )}
         {/* Suppress the native context menu inside the canvas so RIGHT-mouse drag
             pans (panOnDrag=[1,2]) instead of popping a menu that aborts the drag.
@@ -2137,21 +2173,8 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
           </Panel>
           )}
 
-          {/* Agent Catalog opener — top-left island. Opens the application-level
-              catalog panel (marketplace of agents/skills/mcps). Not a canvas tile. */}
-          {!zen && (
-          <Panel position="top-left" className="!m-0 !mt-3 !ml-3">
-            <button
-              onClick={() => setCatalogOpen(true)}
-              className="hm-island inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] font-medium text-[var(--color-fg)] hover:bg-[var(--color-bg3)] transition-colors cursor-pointer"
-              title="Agent Catalog — your agents, skills & MCPs"
-              aria-label="Open agent catalog"
-            >
-              <Boxes aria-hidden className="size-4 text-[var(--color-fg2)]" />
-              <span>Catalog</span>
-            </button>
-          </Panel>
-          )}
+          {/* Agent Catalog toggle lives OUTSIDE ReactFlow (below), so it stays
+              clickable when the catalog view overlays the flow pane. */}
 
           {/* Roster removed — the top-left WorkspaceSwitcher (App) is the
               single workspace UI. Click a frame on the canvas to set active. */}
@@ -2270,12 +2293,13 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, onOpenFold
         />
         <SyncSettingsModal root={syncSettingsRoot} onClose={() => setSyncSettingsRoot(null)} />
         <ThemeCustomizer open={customizerOpen} onClose={() => setCustomizerOpen(false)} />
-        <CatalogPanel
-          open={catalogOpen}
-          onClose={() => setCatalogOpen(false)}
-          targets={catalogTargets}
-          onSpawn={(o) => void spawnCatalogAgent(o)}
-        />
+        {/* Catalog editor fills the main region (over the flow, which stays
+            mounted so sessions survive) when the rail is in Catalog mode. */}
+        {!zen && railMode === "catalog" && (
+          <div className="absolute inset-0 z-20 flex flex-row bg-[var(--color-bg)]">
+            <CatalogEditor selection={catalogSel} onClose={() => setCatalogSel(null)} />
+          </div>
+        )}
         {claudePick && (
           // z above the tile fullscreen overlay (z-[9999]) so the picker shows ON
           // TOP of a fullscreened diff/editor instead of behind it.
