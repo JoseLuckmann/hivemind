@@ -135,9 +135,10 @@ export function resolveFrameCollisions(
  *    stagger (one wraps down, the next stays right, …) — the "nested layers get
  *    lost / dispersed" bug. Instead reflow them into a stable left→right row
  *    that wraps past FRAME_ROW_MAX, in READING ORDER of their current top-lefts,
- *    anchored at the group's top-left. The anchor keeps its slot (the reflow
- *    origin is the anchor's current corner when present) so the frame you just
- *    touched doesn't jump.
+ *    anchored at the GROUP's top-left (not the anchor's) so the reflow's origin
+ *    is independent of which sibling happens to be the anchor — the anchor's
+ *    slot is still respected via the reading-order sort, which is derived from
+ *    current positions.
  *
  * Pure — returns deltas; the caller applies them (to member tiles).
  */
@@ -157,11 +158,13 @@ function separateSiblingFrames(
   if (rects.length <= 2 || !anyOverlap) return resolveFrameCollisions(rects, anchorId, gap);
 
   // 3+ overlapping: reflow into a stable wrapping row in reading order. Origin
-  // = the group's current top-left (or the anchor's corner, so it stays put).
-  const sorted = [...rects].sort((a, b) => a.y - b.y || a.x - b.x || (a.id < b.id ? -1 : 1));
-  const anchor = anchorId ? rects.find((r) => r.id === anchorId) : undefined;
-  const originX = anchor ? anchor.x : Math.min(...rects.map((r) => r.x));
-  const originY = anchor ? anchor.y : Math.min(...rects.map((r) => r.y));
+  // = the group's current top-left, regardless of which rect is the anchor —
+  // bucket the y term so siblings a few px apart in top don't flip reading order.
+  const sorted = [...rects].sort(
+    (a, b) => (Math.round(a.y / 64) - Math.round(b.y / 64)) || a.x - b.x || (a.id < b.id ? -1 : 1),
+  );
+  const originX = Math.min(...rects.map((r) => r.x));
+  const originY = Math.min(...rects.map((r) => r.y));
   const out: Record<string, { dx: number; dy: number }> = {};
   let x = originX, y = originY, rowH = 0;
   for (const r of sorted) {

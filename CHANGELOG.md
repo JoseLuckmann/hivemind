@@ -23,6 +23,10 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
   pairwise collision separation staggered them into a diagonal cascade. They now reflow into a
   clean left-to-right row (wrapping past the row width) in reading order, staying inside the
   parent frame.
+- **Sibling-frame reflow no longer jumps the whole nest.** The reflow's row origin was taken
+  from the anchor frame's corner, so dragging a sub-frame that wasn't reading-order-first
+  shifted every sibling and the parent. The origin is now the group's top-left, independent
+  of which sibling is the anchor.
 
 ## [1.15.0] — 2026-07-30
 

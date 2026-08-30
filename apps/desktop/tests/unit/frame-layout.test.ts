@@ -251,6 +251,35 @@ test("nested: 3 sibling children reflow into a clean row (no diagonal scatter)",
   assert.ok(contains(P, C1) && contains(P, C2) && contains(P, C3), "parent contains all three");
 });
 
+test("nested: 3 sibling reflow is anchor-independent (origin is the group's, not the anchor's)", () => {
+  // REGRESSION: separateSiblingFrames used to take the row origin from the
+  // anchor's current corner. When the anchor wasn't reading-order-first, the
+  // whole row (and the parent wrapping it) shifted to the anchor's position —
+  // dragging the rightmost sibling shoved the entire nest. The origin must be
+  // the group's min x/y regardless of which sibling is the anchor; the anchor
+  // only affects sort/tie-breaking via current position, not the origin.
+  const frames: FrameGeom[] = [
+    { id: "P", x: 0, y: 0, w: 460, h: 200 },
+    { id: "C1", x: 28, y: 64, w: 460, h: 200, parentFrameId: "P" },
+    { id: "C2", x: 516, y: 64, w: 460, h: 200, parentFrameId: "P" },
+    { id: "C3", x: 1004, y: 64, w: 460, h: 200, parentFrameId: "P" },
+  ];
+  const members = new Map([
+    ["C1", [mem(56, 100, 600, 400)]],
+    ["C2", [mem(200, 150, 600, 400)]],
+    ["C3", [mem(340, 200, 600, 400)]],
+  ]);
+  const layoutC1 = computeFrameLayout(frames, members, "C1", K).geometry;
+  const layoutC3 = computeFrameLayout(frames, members, "C3", K).geometry;
+  for (const id of ["P", "C1", "C2", "C3"]) {
+    assert.deepEqual(
+      layoutC3.get(id),
+      layoutC1.get(id),
+      `${id} geometry must be identical regardless of anchor (C1 vs C3)`,
+    );
+  }
+});
+
 test("nested: 4 sibling children all stacked at one spot fan out into a row", () => {
   const frames: FrameGeom[] = [
     { id: "P", x: 0, y: 0, w: 460, h: 200 },
