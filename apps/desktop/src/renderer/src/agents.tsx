@@ -126,10 +126,18 @@ export const AGENTS: AgentDef[] = [
   // restart is handled by the pi provider (`pi --session <id>`, resolved from
   // ~/.pi/agent/sessions for the tile cwd). It reads AGENTS.md natively.
   { id: "pi", label: "Pi", cmd: "pi", icon: PiIcon, enabled: true },
-  // kiro (kiro.dev — Kiro CLI): sessions stored in SQLite (~/.kiro/), scoped by
-  // cwd. No hook system; status is screen-scrape only (detectKiro). Session resume
-  // across a daemon restart uses `kiro-cli chat --resume` which picks the most
-  // recent session for the tile cwd automatically from the local DB.
+  // kiro (kiro.dev — Kiro CLI): ships claude's hook vocabulary (agentSpawn /
+  // userPromptSubmit / preToolUse / postToolUse / stop) via a named custom
+  // agent config selected with `--agent`. hivemind injects one
+  // (`agents/hivemind.json`, in an ephemeral KIRO_HOME overlay — see
+  // hcp/kiro-home.ts) wiring those hooks + `mcpServers.hive`, so a kiro tile is
+  // a real HCP worker: working/idle is hook-driven, a captured `session_id`
+  // gives PER-TILE resume (`--resume-id`, falling back to cwd-scoped
+  // `--resume` if none was captured yet), and `supervise` brokers tool
+  // permission via a kiro-specific PreToolUse hook. "blocked" status is still
+  // screen-scrape only (detectKiro) — kiro has no notification-style event to
+  // hook, and its approval-prompt chrome is unverified without the binary
+  // (see agent-state.ts's ASSUMPTION comment on detectKiro).
   { id: "kiro", label: "Kiro", cmd: "kiro-cli", icon: KiroIcon, enabled: true },
   { id: "gemini", label: "Gemini", cmd: "gemini", icon: GenericAgentIcon, enabled: false },
 ];

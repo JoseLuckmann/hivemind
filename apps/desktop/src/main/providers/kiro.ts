@@ -1,20 +1,34 @@
 /**
- * The kiro (kiro-cli) provider. Kiro stores sessions in a local SQLite database
- * (~/.kiro/) scoped by working directory. It has no hook system and no
- * pre-assignable session id, so status is screen-scrape only (detectKiro in
- * agent-state.ts). On restore, kiro-cli's `--resume` flag picks up the most
- * recent session for the tile's cwd automatically — no manual session file
- * scanning required. This adapter wraps the unit-tested kiro-resume transforms.
+ * The kiro (kiro-cli) provider. kiro-cli ships claude's hook vocabulary
+ * (agentSpawn/userPromptSubmit/preToolUse/postToolUse/stop) via a NAMED custom
+ * agent config, so — given an ephemeral KIRO_HOME overlay seeded with
+ * hivemind's `agents/hivemind.json` (ctx.kiroHome) — it emits deterministic
+ * turn signals: `userPromptSubmit`/`stop` drive working/idle, and a captured
+ * `session_id` (off the first hook event) enables PER-TILE resume via
+ * `--resume-id`, not just per-cwd. The renderer screen-scrape (`detectKiro`)
+ * stays as the fallback for sessions started before injection, and is the ONLY
+ * source for "blocked" (kiro has no notification-style event — see
+ * agent-state.ts). `matches`/session logic is imported from kiro-resume.ts
+ * (kiro-cli ONLY — the bare `kiro` binary is a different product, the Kiro
+ * IDE — see that file for why aliasing it would misfire).
  */
-import { basename } from "node:path";
-import { makeKiroResumeTransforms } from "../kiro-resume.js";
+import { isKiro, makeKiroResumeTransforms } from "../kiro-resume.js";
 import type { AgentProvider } from "./types.js";
 
 export const kiroProvider: AgentProvider = {
   id: "kiro",
-  matches: (cmd) => {
-    const bin = basename((cmd ?? "").trim().split(/\s+/)[0] ?? "");
-    return bin === "kiro-cli" || bin === "kiro";
-  },
-  resume: () => makeKiroResumeTransforms(),
+  matches: (cmd) => isKiro({ cmd: cmd ?? "" }),
+  resume: (ctx) =>
+    makeKiroResumeTransforms({
+      execPath: ctx.execPath,
+      kiroHome: ctx.kiroHome,
+      stopHookPath: ctx.stopHookPath,
+      userpromptHookPath: ctx.userpromptHookPath,
+      kiroApprovalHookPath: ctx.kiroApprovalHookPath,
+      trackerPath: ctx.trackerPath,
+      tileSessionsDir: ctx.tileSessionsDir,
+      legacyMapFile: ctx.legacyMapFile,
+      hcpSock: ctx.hcpSock,
+      hcpToken: ctx.hcpToken,
+    }),
 };
