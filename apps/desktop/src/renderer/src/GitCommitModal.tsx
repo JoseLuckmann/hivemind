@@ -42,6 +42,15 @@ export function GitCommitModal({
   useEffect(() => {
     if (open) { setSummary(""); setDescription(""); }
   }, [open]);
+  // Escape closes the dialog, matching every other modal/menu in the app.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); onOpenChange(false); }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onOpenChange]);
   // Default the stage-all toggle to ON when nothing is staged yet (the common
   // "commit everything" case), OFF when the user already curated an index.
   useEffect(() => {
@@ -81,12 +90,16 @@ export function GitCommitModal({
     setDescription("");
   };
 
-  const onCommit = () => { if (canCommit) void doStageAndCommit(); };
+  const onCommit = () => { if (canCommit) void doStageAndCommit().catch(() => {}); };
   const onCommitPush = () => {
     if (!canCommit) return;
-    void doStageAndCommit().then(() =>
-      pushMut.mutateAsync({ repoPath: repoPath!, setUpstream: !status?.upstream }),
-    );
+    // Both mutations already toast on failure (useGitCommit/useGitPush's
+    // onError); this `.catch` only swallows the rejection that would
+    // otherwise propagate as an unhandled promise rejection when the commit
+    // (or the chained push) fails.
+    void doStageAndCommit()
+      .then(() => pushMut.mutateAsync({ repoPath: repoPath!, setUpstream: !status?.upstream }))
+      .catch(() => {});
   };
   const onPush = () => { if (canPush) pushMut.mutate({ repoPath: repoPath!, setUpstream: !status?.upstream }); };
   const onPull = () => { if (canPull) pullMut.mutate({ repoPath: repoPath! }); };

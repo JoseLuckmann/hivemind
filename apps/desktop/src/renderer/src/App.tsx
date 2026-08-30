@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Bell, ExternalLink, LayoutGrid, Loader2, PanelsTopLeft, Plus, Settings } from "lucide-react";import path from "path-browserify";
+import { Bell, ExternalLink, LayoutGrid, Loader2, PanelsTopLeft, Plus, Settings } from "lucide-react";
+import path from "path-browserify";
 import type { UpdateStatus } from "../../shared/ipc";
 import {
   inElectron,

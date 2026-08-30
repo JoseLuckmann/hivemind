@@ -47,6 +47,7 @@ const GIT_DEFAULT_TIMEOUT_MS = 30_000;
 const GIT_TIMEOUTS: Record<string, number> = {
   push: 5 * 60_000,
   fetch: 5 * 60_000,
+  pull: 5 * 60_000,
   clone: 10 * 60_000,
   diff: 60_000, // large diffs on big repos take a beat
 };

@@ -40,7 +40,7 @@ export type PinRect = { sx: number; sy: number; w: number; h: number };
  *  reference stable across re-renders and re-renders portals when it first mounts. */
 export const PinnedLayerContext = createContext<HTMLElement | null>(null);
 
-type TerminalNodeData = {
+export type TerminalNodeData = {
   tileId: string;
   cwd: string;
   cmd: string;
@@ -52,23 +52,68 @@ type TerminalNodeData = {
   onOpenInBrowser?: (url: string) => void;
   onOpenInEditor?: (path: string) => void;
   onClose?: () => void;
+  pinned?: boolean;
+  onTogglePin?: (id: string, rect: PinRect) => void;
 };
 
-type DiffNodeData = {
+export type DiffNodeData = {
   repoPath: string;
   initialMode?: "working" | "branch";
   initialBase?: string;
   onClose?: () => void;
+  pinned?: boolean;
+  onTogglePin?: (id: string, rect: PinRect) => void;
 };
 
-type WorkbenchNodeData = {
+export type WorkbenchNodeData = {
   repoPath: string;
   tabs: string[];
   onOpenFile: (path: string) => void;
   onOpenInBrowser?: (url: string) => void;
   onCloseTab: (path: string) => void;
   onClose: () => void;
+  pinned?: boolean;
+  onTogglePin?: (id: string, rect: PinRect) => void;
 };
+
+export type BrowserNodeData = {
+  tileId: string;
+  frameId?: string | null;
+  url?: string;
+  openReq?: { url: string; seq: number } | null;
+  onClose?: () => void;
+  pinned?: boolean;
+  onTogglePin?: (id: string, rect: PinRect) => void;
+};
+
+export type IssuesNodeData = {
+  root: string | null;
+  onClose: () => void;
+  pinned?: boolean;
+  onTogglePin?: (id: string, rect: PinRect) => void;
+};
+
+export type PlanReviewNodeData = {
+  requestId?: string;
+  hcpCmdId?: string;
+  plan: string;
+  cwd: string;
+  agentTileId?: string;
+  onClose?: () => void;
+};
+
+/** Discriminated union of every tile kind's `TileBody` props, keyed by `type`.
+ *  Replaces the old `data: Record<string, unknown>` + `as unknown as X` casts:
+ *  each node wrapper below already holds statically-typed data and constructs
+ *  one of these variants directly, so a field rename breaks the build instead
+ *  of silently arriving as `undefined`. */
+export type TileBodyProps =
+  | { type: "terminal"; data: TerminalNodeData; selected: boolean }
+  | { type: "diff"; data: DiffNodeData; selected: boolean }
+  | { type: "workbench"; data: WorkbenchNodeData; selected: boolean }
+  | { type: "browser"; data: BrowserNodeData; selected: boolean }
+  | { type: "issues"; data: IssuesNodeData; selected: boolean }
+  | { type: "planReview"; data: PlanReviewNodeData; selected: boolean };
 
 // Each node wrapper is memoized so a Canvas re-render does NOT re-render
 // every tile when its `data` is shallow-equal. Each is also wrapped in
@@ -576,96 +621,97 @@ function TileLoading({ label }: { label: string }) {
 
 /**
  * TileBody — the SHARED, chrome-less body for every tile kind. Given a node's
- * `type` + `data` (exactly the shapes `buildBaseNodes` produces), it renders the
- * pure tile component (TerminalTile / DiffTile / …) with NO react-flow shell,
- * resize handles, or pin chip. Two consumers render it:
- *   • the react-flow node wrappers below (inside a TileShell), and
- *   • the windowed view (WindowsView), which hosts ONE active tile at a time.
- *
- * Option B (see feat/windowed-view-mode): both consumers render this with a
- * STABLE React key (the tile id) so switching view modes remounts the body at
- * most once. TerminalTile reattaches to its persistent PTY daemon by id, so a
- * remount preserves the live session + scrollback; diff/issues/browser re-fetch
- * cheaply. Because the props come from the same `data`, behaviour is identical
- * in both modes.
+ * `type` + `data` (exactly the shapes `buildBaseNodes` produces, typed via the
+ * `TileBodyProps` discriminated union above), it renders the pure tile
+ * component (TerminalTile / DiffTile / …) with NO react-flow shell, resize
+ * handles, or pin chip. Two consumers render it:
+ *   • the react-flow node wrappers below (inside a TileShell) — each already
+ *     holds statically-typed `data` and constructs its own union member
+ *     directly, so a field rename is a compile error here, not a silent
+ *     `undefined` at runtime; and
+ *   • the windowed view (WindowsView), which mounts EVERY open tab's body at
+ *     once and hides the inactive ones with `visibility` (see WindowsView's
+ *     docblock for why — remount-is-harmless only holds for LOCAL tiles;
+ *     detach on a remote (`ssh://`) tile kills the session outright).
  */
-export function TileBody({
-  type,
-  data,
-  selected,
-}: {
-  type: string;
-  // The node data union — the same object mkTile bakes. Typed loosely because
-  // each branch narrows via the node's discriminating `type`; the wrappers pass
-  // their already-typed data straight through.
-  data: Record<string, unknown>;
-  selected: boolean;
-}): ReactNode {
-  switch (type) {
-    case "terminal":
+export function TileBody(props: TileBodyProps): ReactNode {
+  switch (props.type) {
+    case "terminal": {
+      const { data, selected } = props;
       return (
-        <TileErrorBoundary label={(data.label as string) ?? "terminal"} onClose={data.onClose as (() => void) | undefined}>
-          <TerminalTile {...(data as unknown as TerminalNodeData)} selected={selected} />
+        <TileErrorBoundary label={data.label ?? "terminal"} onClose={data.onClose}>
+          <TerminalTile {...data} selected={selected} />
         </TileErrorBoundary>
       );
-    case "diff":
+    }
+    case "diff": {
+      const { data } = props;
       return (
-        <TileErrorBoundary label="Diff" onClose={data.onClose as (() => void) | undefined}>
+        <TileErrorBoundary label="Diff" onClose={data.onClose}>
           <Suspense fallback={<TileLoading label="Loading diff…" />}>
-            <DiffTile {...(data as unknown as DiffNodeData)} />
+            <DiffTile {...data} />
           </Suspense>
         </TileErrorBoundary>
       );
-    case "workbench":
+    }
+    case "workbench": {
+      const { data } = props;
       return (
-        <TileErrorBoundary label="Editor" onClose={data.onClose as (() => void) | undefined}>
+        <TileErrorBoundary label="Editor" onClose={data.onClose}>
           <Suspense fallback={<TileLoading label="Loading editor…" />}>
             <WorkbenchTile
-              repoPath={data.repoPath as string}
-              tabs={data.tabs as string[]}
-              onOpenFile={data.onOpenFile as (p: string) => void}
-              onOpenInBrowser={data.onOpenInBrowser as ((u: string) => void) | undefined}
-              onCloseTab={data.onCloseTab as (p: string) => void}
-              onClose={data.onClose as () => void}
-              pinned={data.pinned as boolean | undefined}
-              onTogglePin={data.onTogglePin as never}
+              repoPath={data.repoPath}
+              tabs={data.tabs}
+              onOpenFile={data.onOpenFile}
+              onOpenInBrowser={data.onOpenInBrowser}
+              onCloseTab={data.onCloseTab}
+              onClose={data.onClose}
+              pinned={data.pinned}
+              onTogglePin={data.onTogglePin}
             />
           </Suspense>
         </TileErrorBoundary>
       );
-    case "browser":
+    }
+    case "browser": {
+      const { data, selected } = props;
       return (
-        <TileErrorBoundary label="Browser" onClose={data.onClose as (() => void) | undefined}>
+        <TileErrorBoundary label="Browser" onClose={data.onClose}>
           <BrowserTile
-            tileId={data.tileId as string}
-            frameId={data.frameId as string | null | undefined}
-            url={data.url as string | undefined}
-            openReq={data.openReq as { url: string; seq: number } | null | undefined}
+            tileId={data.tileId}
+            frameId={data.frameId}
+            url={data.url}
+            openReq={data.openReq}
             selected={selected}
-            onClose={data.onClose as (() => void) | undefined}
-            pinned={data.pinned as boolean | undefined}
-            onTogglePin={data.onTogglePin as never}
+            onClose={data.onClose}
+            pinned={data.pinned}
+            onTogglePin={data.onTogglePin}
           />
         </TileErrorBoundary>
       );
-    case "issues":
+    }
+    case "issues": {
+      const { data, selected } = props;
       return (
-        <TileErrorBoundary label="Issues" onClose={data.onClose as (() => void) | undefined}>
+        <TileErrorBoundary label="Issues" onClose={data.onClose}>
           <IssuesTile
-            root={data.root as string | null}
-            onClose={data.onClose as () => void}
+            root={data.root}
+            onClose={data.onClose}
             selected={selected}
-            pinned={data.pinned as boolean | undefined}
-            onTogglePin={data.onTogglePin as never}
+            pinned={data.pinned}
+            onTogglePin={data.onTogglePin}
           />
         </TileErrorBoundary>
       );
-    case "planReview":
+    }
+    case "planReview": {
+      const { data } = props;
       return (
-        <TileErrorBoundary label="Plan review" onClose={data.onClose as (() => void) | undefined}>
-          <PlanReviewTile {...(data as unknown as PlanReviewNodeData)} />
+        <TileErrorBoundary label="Plan review" onClose={data.onClose}>
+          <PlanReviewTile {...data} />
         </TileErrorBoundary>
       );
+    }
     default:
       return null;
   }
@@ -683,7 +729,7 @@ const TerminalNode = memo(function TerminalNode({
   const wheelRef = useTileWheelZoom(selected);
   return (
     <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} wheelRef={wheelRef}>
-      <TileBody type="terminal" data={data as unknown as Record<string, unknown>} selected={selected} />
+      <TileBody type="terminal" data={data} selected={selected} />
     </TileShell>
   );
 });
@@ -700,7 +746,7 @@ const DiffNode = memo(function DiffNode({
   const wheelRef = useTileWheelZoom(selected);
   return (
     <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={400} minHeight={240} wheelRef={wheelRef}>
-      <TileBody type="diff" data={data as unknown as Record<string, unknown>} selected={selected} />
+      <TileBody type="diff" data={data} selected={selected} />
     </TileShell>
   );
 });
@@ -717,18 +763,11 @@ const WorkbenchNode = memo(function WorkbenchNode({
   const wheelRef = useTileWheelZoom(selected);
   return (
     <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={520} minHeight={360} wheelRef={wheelRef}>
-      <TileBody type="workbench" data={data as unknown as Record<string, unknown>} selected={selected} />
+      <TileBody type="workbench" data={data} selected={selected} />
     </TileShell>
   );
 });
 
-type BrowserNodeData = {
-  tileId: string;
-  frameId?: string | null;
-  url?: string;
-  openReq?: { url: string; seq: number } | null;
-  onClose?: () => void;
-};
 const BrowserNode = memo(function BrowserNode({
   id,
   data,
@@ -741,12 +780,11 @@ const BrowserNode = memo(function BrowserNode({
   const wheelRef = useTileWheelZoom(selected);
   return (
     <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={420} minHeight={280} wheelRef={wheelRef}>
-      <TileBody type="browser" data={data as unknown as Record<string, unknown>} selected={selected} />
+      <TileBody type="browser" data={data} selected={selected} />
     </TileShell>
   );
 });
 
-type IssuesNodeData = { root: string | null; onClose: () => void };
 const IssuesNode = memo(function IssuesNode({
   id,
   data,
@@ -759,19 +797,11 @@ const IssuesNode = memo(function IssuesNode({
   const wheelRef = useTileWheelZoom(selected);
   return (
     <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={280} wheelRef={wheelRef}>
-      <TileBody type="issues" data={data as unknown as Record<string, unknown>} selected={selected} />
+      <TileBody type="issues" data={data} selected={selected} />
     </TileShell>
   );
 });
 
-type PlanReviewNodeData = {
-  requestId?: string;
-  hcpCmdId?: string;
-  plan: string;
-  cwd: string;
-  agentTileId?: string;
-  onClose?: () => void;
-};
 const PlanReviewNode = memo(function PlanReviewNode({
   id,
   data,
@@ -784,7 +814,7 @@ const PlanReviewNode = memo(function PlanReviewNode({
   const wheelRef = useTileWheelZoom(selected);
   return (
     <TileShell id={id} selected={selected} pin={data} onClose={data.onClose} onResize={data.onResize} minWidth={420} minHeight={300} wheelRef={wheelRef}>
-      <TileBody type="planReview" data={data as unknown as Record<string, unknown>} selected={selected} />
+      <TileBody type="planReview" data={data} selected={selected} />
     </TileShell>
   );
 });

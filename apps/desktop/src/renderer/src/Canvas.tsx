@@ -55,7 +55,8 @@ import { useCanvasShortcuts } from "./useCanvasShortcuts";
 import { useNodeDragStop } from "./useNodeDragStop";
 import { WindowsView } from "./WindowsView";
 import { GitCommitModal } from "./GitCommitModal";
-import { useGitPush, useGitPull } from "./queries";import {
+import { useGitPush, useGitPull } from "./queries";
+import {
   loadViewMode, saveViewMode, loadMinimized, saveMinimized, nextActiveTab, type ViewMode,
 } from "./windows-view-state";
 import type { WorktreeEntry } from "../../shared/ipc";
@@ -760,7 +761,12 @@ export function Canvas({ cwd, repoPath, root = null, onInitWorkspace, updateAvai
       const f = framesRef.current.find((x) => x.id === frameId);
       return f?.worktreePath ?? f?.workspacePath ?? repoPath ?? null;
     },
-  }), [frameOpen, onCreateWorktree, onAttachWorktree, bindWorkspace, arrangeFrame, updateFrameTitle, updateFrameColor, deleteFrame, repoPath, repoOfFrame, gitPushMut, gitPullMut]);
+    // Depend on the stable `.mutate` function refs, NOT the mutation objects
+    // themselves — useMutation returns a fresh object every time isPending/
+    // isError/etc changes, so depending on `gitPushMut`/`gitPullMut` directly
+    // recreated `frameActions` (and re-rendered LayersPanel) on every push/pull
+    // status tick even though nothing this memo actually reads had changed.
+  }), [frameOpen, onCreateWorktree, onAttachWorktree, bindWorkspace, arrangeFrame, updateFrameTitle, updateFrameColor, deleteFrame, repoPath, repoOfFrame, gitPushMut.mutate, gitPullMut.mutate]);
   const openFileFromTerminal = useCallback((sourceTileId: string, path: string) => {
     const sourceFrameId = frameOfRef.current[sourceTileId] ?? selectedFrameIdRef.current;
     const existing = tilesRef.current.find((t) => (

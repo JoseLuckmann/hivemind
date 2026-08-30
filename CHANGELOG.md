@@ -13,9 +13,10 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
   (⌘E, or from **Settings ▸ View**): the graph rail stays on the left, a single tab strip
   runs across the top with each tab tinted by its frame's color, and the active tile fills
   the rest. Tabs can be **minimized** — hidden from the strip but still present in the graph
-  rail, one click away from being restored. The tile bodies render from the same data as the
-  canvas, so switching modes keeps live agent sessions intact (terminals reattach to their
-  PTY). The mode preference persists globally; the minimized set persists per repo.
+  rail, one click away from being restored. Every open tab's body stays mounted (hidden, not
+  torn down) so switching tabs never disturbs a live agent session — including a remote
+  (`ssh://`) tile, which has no daemon to reattach to if it's ever detached. The mode
+  preference persists globally; the minimized set persists per repo.
 - **Right-click a frame in the Layers rail** for a nested context menu that mirrors the
   on-canvas frame header — Spawn agent ▸, Open ▸ (terminal/editor/diff/issues/browser),
   Git ▸, Worktree ▸, Workspace ▸ (bind folder / attach SSH remote), Arrange ▸, plus inline
@@ -43,6 +44,15 @@ Each release is published to [GitHub Releases](https://github.com/dip497/hivemin
   pairwise collision separation staggered them into a diagonal cascade. They now reflow into a
   clean left-to-right row (wrapping past the row width) in reading order, staying inside the
   parent frame.
+- **Windowed mode no longer kills remote agent sessions on a tab switch.** It previously
+  mounted only the active tab's body; unmounting a tile detaches its PTY, and detach on a
+  remote (`ssh://`) tile is routed to a hard kill (an SSH session can't survive a detach the
+  way a local daemon-backed one can). Clicking a second tab — or ⌘E — silently terminated
+  every non-active remote agent tile. Every open tab now stays mounted for as long as it's
+  open; only the active one is shown.
+- **`git pull` no longer inherits the 30s default timeout.** `push`/`fetch`/`clone` already had
+  a longer allowance for slow networks; `pull` fell through to the 30s default and could get
+  SIGTERM'd mid-fetch on a big update. It now gets the same 5-minute budget as `push`/`fetch`.
 
 ## [1.15.0] — 2026-07-30
 

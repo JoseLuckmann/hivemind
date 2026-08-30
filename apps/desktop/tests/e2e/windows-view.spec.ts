@@ -139,3 +139,92 @@ test("frame header shows a git button", async () => {
   await expect(frame).toBeVisible();
   await expect(frame.getByRole("button", { name: "git" }).first()).toBeVisible();
 });
+
+// Regression for the windowed-mode remote-agent-kill blocker: WindowsView used
+// to render ONLY the active tab's body, so switching tabs unmounted every other
+// open tile — TerminalTile's unmount calls window.hive.ptyDetach, which main
+// routes to killRemotePty for a remote (ssh://) tile. The fix keeps every open
+// tab's body mounted (hidden via visibility, not display:none/unmount) so a
+// tab switch can never fire that teardown. These specs assert the OBSERVABLE
+// contract of that fix: every tab's body is mounted at once, an inactive tab's
+// container is hidden (not removed), and a tab's container survives a
+// switch-away-and-back with no remount and no pty exit.
+test("every open tab's body stays mounted; switching tabs never remounts the inactive one", async () => {
+  // Spawn a second terminal so there's definitely something to switch away
+  // from and back to, regardless of what earlier tests in this file left open.
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("hivemind:canvas-toggle", { detail: "shell" })));
+  await page.waitForTimeout(500);
+
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("hivemind:toggle-view-mode")));
+  await page.waitForSelector('[role="tablist"]');
+  const tabs = page.locator('[role="tab"]');
+  const tabCount = await tabs.count();
+  expect(tabCount).toBeGreaterThanOrEqual(2);
+
+  // Every open tab's terminal is mounted AT ONCE, not just the active tab's.
+  // Before the fix this count would be 1 regardless of how many tabs exist.
+  await expect(page.locator(".xterm")).toHaveCount(tabCount);
+
+  const bodies = page.locator("[data-tile-id]");
+  const idA = await bodies.nth(0).getAttribute("data-tile-id");
+  const containerA = page.locator(`[data-tile-id="${idA}"]`);
+
+  // Tag tile A's container with a probe property. A React unmount+remount
+  // produces a brand-new DOM node, which would NOT carry this property — a
+  // simple, dependency-free way to prove "never torn down" across a switch.
+  await containerA.evaluate((el) => { (el as unknown as Record<string, unknown>).__probe = "kept"; });
+
+  // The inactive tab's container is hidden via `visibility` (not display:none
+  // — a 0×0 box breaks xterm's fit addon) while still occupying full size.
+  const inactiveContainer = bodies.nth(1);
+  await expect(inactiveContainer).toHaveCSS("visibility", "hidden");
+  const inactiveBox = await inactiveContainer.boundingBox();
+  expect(inactiveBox?.width ?? 0).toBeGreaterThan(100);
+  expect(inactiveBox?.height ?? 0).toBeGreaterThan(100);
+
+  // Switch to the second tab, then back to the first.
+  await tabs.nth(1).click();
+  await page.waitForTimeout(300);
+  await expect(page.locator(".xterm")).toHaveCount(tabCount); // still every body mounted
+  await tabs.nth(0).click();
+  await page.waitForTimeout(300);
+
+  // The probe survived — tile A's container was never unmounted/remounted
+  // across the switch. A remount would have torn down xterm's scrollback +
+  // WebGL slot locally, and outright killed a remote (ssh://) tile's PTY.
+  const probeAfter = await containerA.evaluate((el) => (el as unknown as Record<string, unknown>).__probe);
+  expect(probeAfter).toBe("kept");
+});
+
+test("no pty exit fires for a tile while switching tabs away from and back to it", async () => {
+  const ids = await page.locator("[data-tile-id]").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-tile-id")).filter((id): id is string => !!id),
+  );
+  expect(ids.length).toBeGreaterThanOrEqual(2);
+
+  // Wire a real onPtyExit listener (exposed on window.hive by the preload
+  // bridge) for every open tile, then flip through all the tabs. If a tab
+  // switch ever unmounts an inactive tile the way it used to, a persistent
+  // local tile would at least detach cleanly — but a remote tile's detach is
+  // routed to killRemotePty, which fires pty:exit. None should fire here.
+  await page.evaluate((tileIds: string[]) => {
+    (window as unknown as { __ptyExited: unknown[] }).__ptyExited = [];
+    for (const id of tileIds) {
+      window.hive.onPtyExit(id, (info) => {
+        (window as unknown as { __ptyExited: unknown[] }).__ptyExited.push({ id, info });
+      });
+    }
+  }, ids);
+
+  const tabs = page.locator('[role="tab"]');
+  const count = await tabs.count();
+  for (let i = 0; i < count; i++) {
+    await tabs.nth(i).click();
+    await page.waitForTimeout(150);
+  }
+  await tabs.nth(0).click();
+  await page.waitForTimeout(150);
+
+  const exited = await page.evaluate(() => (window as unknown as { __ptyExited: unknown[] }).__ptyExited);
+  expect(exited).toEqual([]);
+});
